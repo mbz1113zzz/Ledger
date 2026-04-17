@@ -1,0 +1,112 @@
+import json
+import sqlite3
+from datetime import datetime
+from pathlib import Path
+
+from sources.base import Event
+
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    source TEXT NOT NULL,
+    external_id TEXT NOT NULL,
+    ticker TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT,
+    url TEXT,
+    published_at TIMESTAMP NOT NULL,
+    importance TEXT NOT NULL,
+    raw_json TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(source, external_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ticker_time ON events(ticker, published_at DESC);
+CREATE INDEX IF NOT EXISTS idx_importance_time ON events(importance, published_at DESC);
+"""
+
+
+class Storage:
+    def __init__(self, db_path: str):
+        Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.row_factory = sqlite3.Row
+
+    def init_schema(self) -> None:
+        self._conn.executescript(SCHEMA)
+        self._conn.commit()
+
+    def exists(self, source: str, external_id: str) -> bool:
+        cur = self._conn.execute(
+            "SELECT 1 FROM events WHERE source=? AND external_id=? LIMIT 1",
+            (source, external_id),
+        )
+        return cur.fetchone() is not None
+
+    def insert(self, event: Event) -> bool:
+        """Returns True if inserted, False if duplicate."""
+        try:
+            self._conn.execute(
+                """INSERT INTO events
+                   (source, external_id, ticker, event_type, title, summary, url,
+                    published_at, importance, raw_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    event.source,
+                    event.external_id,
+                    event.ticker,
+                    event.event_type,
+                    event.title,
+                    event.summary,
+                    event.url,
+                    event.published_at.isoformat(),
+                    event.importance,
+                    json.dumps(event.raw),
+                ),
+            )
+            self._conn.commit()
+            return True
+        except sqlite3.IntegrityError:
+            return False
+
+    def query(
+        self,
+        *,
+        importance: str | None = None,
+        ticker: str | None = None,
+        limit: int = 100,
+    ) -> list[Event]:
+        sql = "SELECT * FROM events WHERE 1=1"
+        params: list = []
+        if importance:
+            sql += " AND importance = ?"
+            params.append(importance)
+        if ticker:
+            sql += " AND ticker = ?"
+            params.append(ticker)
+        sql += " ORDER BY published_at DESC LIMIT ?"
+        params.append(limit)
+        rows = self._conn.execute(sql, params).fetchall()
+        return [self._row_to_event(r) for r in rows]
+
+    def cleanup(self, retain_days: int) -> int:
+        cur = self._conn.execute(
+            f"DELETE FROM events WHERE created_at < datetime('now', '-{int(retain_days)} days')"
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    def _row_to_event(self, row: sqlite3.Row) -> Event:
+        return Event(
+            source=row["source"],
+            external_id=row["external_id"],
+            ticker=row["ticker"],
+            event_type=row["event_type"],
+            title=row["title"],
+            summary=row["summary"],
+            url=row["url"],
+            published_at=datetime.fromisoformat(row["published_at"]),
+            raw=json.loads(row["raw_json"] or "{}"),
+            importance=row["importance"],
+        )
