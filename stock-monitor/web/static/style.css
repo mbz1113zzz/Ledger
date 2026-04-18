@@ -1,0 +1,28 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, sans-serif; background: #0d1117; color: #c9d1d9; }
+header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 14px 24px; background: #161b22; border-bottom: 1px solid #21262d;
+}
+header h1 { font-size: 18px; }
+.controls { display: flex; gap: 16px; align-items: center; font-size: 13px; }
+main { display: grid; grid-template-columns: 220px 1fr; height: calc(100vh - 56px); }
+aside { padding: 16px; background: #0d1117; border-right: 1px solid #21262d; }
+aside h2 { font-size: 13px; margin: 12px 0 6px; color: #8b949e; text-transform: uppercase; }
+aside ul { list-style: none; }
+aside li { padding: 4px 0; font-size: 14px; }
+aside label { display: block; font-size: 13px; padding: 4px 0; cursor: pointer; }
+#feed { padding: 16px; overflow-y: auto; }
+.card {
+  background: #161b22; border-left: 4px solid #30363d; border-radius: 6px;
+  padding: 12px 14px; margin-bottom: 10px; transition: background 1.5s;
+}
+.card.high { border-left-color: #f85149; }
+.card.medium { border-left-color: #d29922; }
+.card.low { border-left-color: #3fb950; }
+.card.new { background: #1f6feb33; }
+.card h3 { font-size: 14px; margin-bottom: 4px; }
+.card .meta { font-size: 12px; color: #8b949e; }
+.card a { color: #58a6ff; text-decoration: none; }
+.card a:hover { text-decoration: underline; }
+.card .summary { font-size: 13px; color: #c9d1d9; margin-top: 6px; }

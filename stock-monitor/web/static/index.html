@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <title>美股事件监控</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header>
+    <h1>美股事件监控</h1>
+    <div class="controls">
+      <span id="summary"></span>
+      <label><input type="checkbox" id="notif-toggle"> 🔔 通知</label>
+    </div>
+  </header>
+  <main>
+    <aside>
+      <h2>Watchlist</h2>
+      <ul id="watchlist"></ul>
+      <h2>重要性筛选</h2>
+      <label><input type="checkbox" data-imp="high" checked> 🔴 高</label>
+      <label><input type="checkbox" data-imp="medium" checked> 🟡 中</label>
+      <label><input type="checkbox" data-imp="low"> 🟢 低</label>
+    </aside>
+    <section id="feed"></section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
