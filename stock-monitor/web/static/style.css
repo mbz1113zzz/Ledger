@@ -419,6 +419,9 @@ aside h2 {
 .card .pill.filing   { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
 .card .pill.earnings { color: var(--med); border-color: color-mix(in srgb, var(--med) 40%, var(--border)); }
 .card .pill.price    { color: var(--high); border-color: color-mix(in srgb, var(--high) 45%, var(--border)); background: color-mix(in srgb, var(--high) 8%, var(--bg-soft)); }
+.card .pill.analyst  { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 10%, var(--bg-soft)); }
+.card .pill.insider  { color: var(--med); border-color: color-mix(in srgb, var(--med) 45%, var(--border)); background: color-mix(in srgb, var(--med) 10%, var(--bg-soft)); }
+.card .pill.sentiment { color: var(--text-2); border-color: color-mix(in srgb, var(--text-2) 40%, var(--border)); background: color-mix(in srgb, var(--text-2) 8%, var(--bg-soft)); }
 
 .card a {
   color: var(--accent);
@@ -502,3 +505,53 @@ aside h2 {
 ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; border: 2px solid var(--bg); }
 ::-webkit-scrollbar-thumb:hover { background: var(--border-2); }
 ::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- tools + modal ---------- */
+.tool-btn {
+  display: block; width: 100%; margin-top: 8px;
+  padding: 9px 12px; text-align: left;
+  font: 500 13px/1.2 var(--f-sans);
+  color: var(--text); background: var(--bg-soft);
+  border: 1px solid var(--border); border-radius: 8px;
+  cursor: pointer; transition: all .15s;
+}
+.tool-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.tool-btn:disabled { opacity: .45; cursor: not-allowed; }
+
+.modal { position: fixed; inset: 0; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center; z-index: 100;
+  animation: fade .15s ease; }
+.modal.hidden { display: none; }
+.modal-card { background: var(--bg); border: 1px solid var(--border);
+  border-radius: 14px; padding: 22px 26px; width: min(680px, 92vw);
+  max-height: 80vh; overflow-y: auto; position: relative;
+  box-shadow: 0 20px 60px rgba(0,0,0,.35); }
+.modal-card h3 { margin: 0 0 14px; font: 600 17px/1.3 var(--f-sans);
+  color: var(--accent); letter-spacing: .01em; }
+.modal-close { position: absolute; top: 12px; right: 14px;
+  background: none; border: none; color: var(--text-2);
+  font-size: 17px; cursor: pointer; padding: 4px 8px; }
+.modal-close:hover { color: var(--accent); }
+.modal-body { font: 14px/1.55 var(--f-sans); color: var(--text); }
+.modal-body pre { font: 12.5px/1.65 var(--f-mono); white-space: pre-wrap;
+  background: var(--bg-soft); border: 1px solid var(--border);
+  border-radius: 8px; padding: 14px; margin: 0; color: var(--text); }
+.modal-body .bt-controls { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.modal-body .bt-controls select { font: 13px var(--f-sans); padding: 6px 10px;
+  background: var(--bg-soft); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; }
+.modal-body .bt-run { font: 500 13px var(--f-sans); padding: 6px 14px;
+  background: var(--accent); color: var(--bg); border: none;
+  border-radius: 6px; cursor: pointer; }
+.modal-body .bt-run:hover { opacity: .9; }
+.modal-body table { width: 100%; border-collapse: collapse; margin-top: 6px; }
+.modal-body th, .modal-body td { text-align: right; padding: 7px 10px;
+  border-bottom: 1px solid var(--border); font: 13px var(--f-mono); }
+.modal-body th { color: var(--text-2); font-weight: 500; font-size: 11.5px;
+  text-transform: uppercase; letter-spacing: .06em; }
+.modal-body td.win { text-align: left; color: var(--text-2); }
+.modal-body td.pos { color: var(--high); }
+.modal-body td.neg { color: var(--accent); }
+.modal-body .empty-note { color: var(--text-2); font-style: italic;
+  padding: 20px 0; text-align: center; }
+@keyframes fade { from { opacity: 0 } to { opacity: 1 } }

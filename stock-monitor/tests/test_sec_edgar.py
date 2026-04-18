@@ -45,6 +45,62 @@ async def test_unknown_ticker_skipped():
     assert events == []
 
 
+FORM4_RESPONSE = {
+    "cik": "0001730168",
+    "filings": {
+        "recent": {
+            "accessionNumber": ["0001-25-000010", "0001-25-000011"],
+            "form":            ["4",               "4/A"],
+            "filingDate":      ["2026-04-15",      "2026-04-14"],
+            "primaryDocument": ["f4.xml",          "f4a.xml"],
+            "primaryDocDescription": ["Form 4",    "Form 4/A"],
+        }
+    },
+}
+
+
+EIGHTK_WITH_ITEMS_RESPONSE = {
+    "cik": "0001730168",
+    "filings": {
+        "recent": {
+            "accessionNumber": ["0001-25-000020"],
+            "form":            ["8-K"],
+            "filingDate":      ["2026-04-17"],
+            "primaryDocument": ["doc.htm"],
+            "primaryDocDescription": ["8-K"],
+            "items":           ["2.02,5.02"],
+        }
+    },
+}
+
+
+@pytest.mark.asyncio
+async def test_fetch_parses_form4_as_insider():
+    src = SecEdgarSource()
+    src._ticker_to_cik = {"EOSE": "0001730168"}
+    with patch.object(src, "_get", new=AsyncMock(return_value=FORM4_RESPONSE)):
+        events = await src.fetch(["EOSE"])
+    assert len(events) == 2
+    assert all(e.event_type == "insider" for e in events)
+    assert "内部人交易" in events[0].title
+    assert events[0].raw["form"] == "4"
+    assert events[1].raw["form"] == "4/A"
+
+
+@pytest.mark.asyncio
+async def test_8k_title_includes_chinese_item_labels():
+    src = SecEdgarSource()
+    src._ticker_to_cik = {"EOSE": "0001730168"}
+    with patch.object(src, "_get", new=AsyncMock(return_value=EIGHTK_WITH_ITEMS_RESPONSE)):
+        events = await src.fetch(["EOSE"])
+    assert len(events) == 1
+    t = events[0].title
+    assert "8-K" in t
+    assert "业绩披露" in t
+    assert "高管/董事变动" in t
+    assert events[0].raw["items"] == ["2.02", "5.02"]
+
+
 @pytest.mark.asyncio
 async def test_load_ticker_map_parses_response():
     src = SecEdgarSource()

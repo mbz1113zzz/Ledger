@@ -49,10 +49,10 @@ class SecEdgarSource(Source):
             except Exception as e:
                 log.warning("sec fetch failed for %s: %s", ticker, e)
                 continue
-            events.extend(self._parse_8ks(data, ticker, cik))
+            events.extend(self._parse_filings(data, ticker, cik))
         return events
 
-    def _parse_8ks(self, data: dict, ticker: str, cik: str) -> list[Event]:
+    def _parse_filings(self, data: dict, ticker: str, cik: str) -> list[Event]:
         try:
             recent = data["filings"]["recent"]
             n = len(recent["accessionNumber"])
@@ -60,8 +60,7 @@ class SecEdgarSource(Source):
             return []
         out: list[Event] = []
         for i in range(n):
-            if recent["form"][i] != "8-K":
-                continue
+            form = recent["form"][i]
             accession = recent["accessionNumber"][i]
             date_str = recent["filingDate"][i]
             try:
@@ -73,18 +72,53 @@ class SecEdgarSource(Source):
             except ValueError:
                 continue
             no_dash = accession.replace("-", "")
-            url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{no_dash}/{recent['primaryDocument'][i]}"
-            out.append(
-                Event(
+            primary_doc = recent["primaryDocument"][i]
+            url = f"https://www.sec.gov/Archives/edgar/data/{int(cik)}/{no_dash}/{primary_doc}"
+            items_field = (recent.get("items") or [""] * n)[i] or ""
+
+            if form == "8-K":
+                items = [x.strip() for x in items_field.split(",") if x.strip()]
+                item_labels = [ITEM_LABELS.get(code, code) for code in items]
+                title = f"{ticker} 8-K"
+                if item_labels:
+                    title += " · " + " / ".join(item_labels)
+                out.append(Event(
                     source=self.name,
                     external_id=accession,
                     ticker=ticker,
                     event_type="filing_8k",
-                    title=f"{ticker} filed 8-K",
+                    title=title,
                     summary=recent.get("primaryDocDescription", [""] * n)[i] or None,
                     url=url,
                     published_at=pub,
-                    raw={"accession": accession, "cik": cik, "date": date_str},
-                )
-            )
+                    raw={"accession": accession, "cik": cik, "date": date_str,
+                         "items": items},
+                ))
+            elif form in ("4", "4/A"):
+                out.append(Event(
+                    source=self.name,
+                    external_id=accession,
+                    ticker=ticker,
+                    event_type="insider",
+                    title=f"{ticker} 内部人交易 (Form {form})",
+                    summary=None,
+                    url=url,
+                    published_at=pub,
+                    raw={"accession": accession, "cik": cik, "date": date_str,
+                         "form": form},
+                ))
         return out
+
+
+ITEM_LABELS = {
+    "1.01": "重大合同", "1.02": "合同终止", "1.03": "破产或接管",
+    "2.01": "完成资产收购/处置", "2.02": "业绩披露", "2.03": "重大直接财务义务",
+    "2.04": "触发加速偿债", "2.05": "退出成本", "2.06": "资产减值",
+    "3.01": "退市通知", "3.02": "定向增发", "3.03": "权利变更",
+    "4.01": "更换会计师", "4.02": "财报不可依赖",
+    "5.01": "控制权变更", "5.02": "高管/董事变动", "5.03": "章程修订",
+    "5.04": "401k计划暂停", "5.05": "道德准则豁免", "5.07": "股东投票结果",
+    "5.08": "股东会日期",
+    "7.01": "Reg FD 披露", "8.01": "其他重大事件",
+    "9.01": "财务报表与附件",
+}

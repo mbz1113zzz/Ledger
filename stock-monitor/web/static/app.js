@@ -55,6 +55,9 @@ function pillFor(type) {
   if (type === 'filing_8k')   return { cls: 'filing', label: '8-K' };
   if (type === 'earnings')    return { cls: 'earnings', label: 'Earnings' };
   if (type === 'price_alert') return { cls: 'price', label: '⚡ 异动' };
+  if (type === 'analyst')     return { cls: 'analyst', label: '分析师' };
+  if (type === 'insider')     return { cls: 'insider', label: '内部人' };
+  if (type === 'sentiment')   return { cls: 'sentiment', label: '📣 舆情' };
   return { cls: 'news', label: 'News' };
 }
 
@@ -140,6 +143,7 @@ function renderWatchlist(tickers) {
     li.addEventListener('click', (e) => {
       if (e.target.dataset.del) return;
       selectedTicker = li.dataset.ticker || null;
+      updateBacktestBtn();
       render();
     });
   });
@@ -239,6 +243,105 @@ function connectStream() {
     connDot.classList.add('bad');
     console.warn('SSE disconnected, browser will auto-reconnect');
   };
+}
+
+/* ---------- modal ---------- */
+const modal = document.getElementById('modal');
+const modalTitle = document.getElementById('modal-title');
+const modalBody = document.getElementById('modal-body');
+document.getElementById('modal-close').addEventListener('click', closeModal);
+modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+function openModal(title, html) {
+  modalTitle.textContent = title;
+  modalBody.innerHTML = html;
+  modal.classList.remove('hidden');
+}
+function closeModal() { modal.classList.add('hidden'); }
+
+/* ---------- digest ---------- */
+document.getElementById('btn-digest').addEventListener('click', async () => {
+  openModal('早报预览', '<p class="empty-note">加载中…</p>');
+  try {
+    const r = await fetch('/api/digest?hours=24');
+    const d = await r.json();
+    const html = `
+      <p style="color:var(--text-2);margin-bottom:12px">${escapeHtml(d.title)}</p>
+      <pre>${escapeHtml(d.body)}</pre>
+    `;
+    openModal('早报预览', html);
+  } catch (e) {
+    openModal('早报预览', `<p class="empty-note">加载失败: ${e.message}</p>`);
+  }
+});
+
+/* ---------- backtest ---------- */
+const btBtn = document.getElementById('btn-backtest');
+btBtn.addEventListener('click', () => {
+  const t = selectedTicker || (watchlistCache[0] || '');
+  renderBacktestPanel(t, 'filing_8k');
+});
+function updateBacktestBtn() { /* always enabled now */ }
+
+function renderBacktestPanel(ticker, eventType) {
+  const tickerOpts = watchlistCache
+    .map(t => `<option value="${t}"${t === ticker ? ' selected' : ''}>${t}</option>`)
+    .join('');
+  const typeOpts = ['filing_8k', 'earnings', 'analyst', 'news', 'price_alert', 'insider']
+    .map(t => `<option value="${t}"${t === eventType ? ' selected' : ''}>${t}</option>`)
+    .join('');
+  const controls = `
+    <div class="bt-controls">
+      <select id="bt-ticker">${tickerOpts}</select>
+      <select id="bt-type">${typeOpts}</select>
+      <button class="bt-run" id="bt-run">运行</button>
+    </div>
+    <div id="bt-result"><p class="empty-note">加载中…</p></div>
+  `;
+  openModal(`事件回测`, controls);
+  const runEl = document.getElementById('bt-run');
+  const tickerEl = document.getElementById('bt-ticker');
+  const typeEl = document.getElementById('bt-type');
+  const run = () => loadBacktest(tickerEl.value, typeEl.value);
+  runEl.addEventListener('click', run);
+  tickerEl.addEventListener('change', run);
+  typeEl.addEventListener('change', run);
+  if (ticker) run(); else document.getElementById('bt-result').innerHTML =
+    '<p class="empty-note">请选择 ticker 和事件类型</p>';
+}
+
+async function loadBacktest(ticker, eventType) {
+  const resEl = document.getElementById('bt-result');
+  resEl.innerHTML = '<p class="empty-note">加载中…</p>';
+  try {
+    const r = await fetch(`/api/backtest?ticker=${ticker}&event_type=${eventType}`);
+    const d = await r.json();
+    if (!d.n_events) {
+      resEl.innerHTML = `<p class="empty-note">没有 ${eventType} 类型的历史事件可供回测</p>`;
+      return;
+    }
+    const rows = d.windows.map(w => {
+      const meanCls = w.mean_pct > 0 ? 'pos' : (w.mean_pct < 0 ? 'neg' : '');
+      const medCls = w.median_pct > 0 ? 'pos' : (w.median_pct < 0 ? 'neg' : '');
+      return `<tr>
+        <td class="win">+${w.window} 日</td>
+        <td>${w.n}</td>
+        <td class="${meanCls}">${w.mean_pct >= 0 ? '+' : ''}${w.mean_pct}%</td>
+        <td class="${medCls}">${w.median_pct >= 0 ? '+' : ''}${w.median_pct}%</td>
+        <td>${(w.positive_rate * 100).toFixed(0)}%</td>
+      </tr>`;
+    }).join('');
+    resEl.innerHTML = `
+      <p style="color:var(--text-2);margin-bottom:8px">共 ${d.n_events} 个历史事件 · 基于 Yahoo 日线</p>
+      <table>
+        <thead><tr><th style="text-align:left">窗口</th><th>样本</th><th>均值</th><th>中位</th><th>上涨率</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `;
+  } catch (e) {
+    resEl.innerHTML = `<p class="empty-note">加载失败: ${e.message}</p>`;
+  }
 }
 
 /* ---------- boot ---------- */
