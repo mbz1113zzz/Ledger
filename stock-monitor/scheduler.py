@@ -8,7 +8,6 @@ import config
 from pipeline import Pipeline
 from sources.finnhub import FinnhubSource
 from sources.sec_edgar import SecEdgarSource
-from sources.yfinance_source import YfinanceSource
 from storage import Storage
 
 log = logging.getLogger(__name__)
@@ -20,7 +19,6 @@ def build_pipeline(
     sources = [
         FinnhubSource(api_key=config.FINNHUB_API_KEY),
         sec_source,
-        YfinanceSource(),
     ]
     return Pipeline(sources=sources, storage=storage, notifier=notifier, tickers=tickers)
 
