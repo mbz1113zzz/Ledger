@@ -44,7 +44,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         log.exception("initial pipeline run failed: %s", e)
 
-    scheduler = start_scheduler(pipeline, price_pipeline, storage)
+    scheduler = start_scheduler(pipeline, price_pipeline, storage,
+                                 push_hub=app.state.push_hub)
     app.state.scheduler = scheduler
 
     log.info("startup complete on port %d", config.PORT)
@@ -73,9 +74,10 @@ def create_app() -> FastAPI:
     app.state.sec_source = sec_source
     app.state.pipeline = pipeline
     app.state.price_pipeline = price_pipeline
+    app.state.push_hub = push_hub
 
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
-    app.include_router(build_router(storage, notifier, watchlist, pipeline, price_pipeline))
+    app.include_router(build_router(storage, notifier, watchlist, pipeline, price_pipeline, push_hub))
     return app
 
 

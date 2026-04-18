@@ -39,6 +39,9 @@ class Pusher(ABC):
     @abstractmethod
     async def push(self, client: httpx.AsyncClient, ev: Event) -> None: ...
 
+    async def push_text(self, client: httpx.AsyncClient, title: str, body: str) -> None:
+        raise NotImplementedError
+
 
 class TelegramPusher(Pusher):
     name = "telegram"
@@ -53,6 +56,9 @@ class TelegramPusher(Pusher):
 
     async def push(self, client: httpx.AsyncClient, ev: Event) -> None:
         title, body = format_message(ev)
+        await self.push_text(client, title, body)
+
+    async def push_text(self, client: httpx.AsyncClient, title: str, body: str) -> None:
         text = f"*{title}*\n{body}"
         resp = await client.post(
             f"https://api.telegram.org/bot{self._token}/sendMessage",
@@ -75,6 +81,9 @@ class BarkPusher(Pusher):
 
     async def push(self, client: httpx.AsyncClient, ev: Event) -> None:
         title, body = format_message(ev)
+        await self.push_text(client, title, body)
+
+    async def push_text(self, client: httpx.AsyncClient, title: str, body: str) -> None:
         url = f"{self._base}/{quote(title)}/{quote(body)}"
         resp = await client.get(url, params={"group": "stock-monitor"})
         resp.raise_for_status()
@@ -93,6 +102,9 @@ class FeishuPusher(Pusher):
 
     async def push(self, client: httpx.AsyncClient, ev: Event) -> None:
         title, body = format_message(ev)
+        await self.push_text(client, title, body)
+
+    async def push_text(self, client: httpx.AsyncClient, title: str, body: str) -> None:
         text = f"{title}\n{body}"
         resp = await client.post(
             self._url,
@@ -121,4 +133,15 @@ class PushHub:
                     await p.push(client, ev)
                 except Exception as e:
                     log.warning("pusher %s failed: %s", p.name, e)
+            await asyncio.gather(*(one(p) for p in self._pushers))
+
+    async def broadcast_text(self, title: str, body: str) -> None:
+        if not self._pushers:
+            return
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            async def one(p: Pusher):
+                try:
+                    await p.push_text(client, title, body)
+                except Exception as e:
+                    log.warning("pusher %s text failed: %s", p.name, e)
             await asyncio.gather(*(one(p) for p in self._pushers))

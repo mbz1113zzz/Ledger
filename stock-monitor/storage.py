@@ -95,6 +95,19 @@ class Storage:
         rows = self._conn.execute(sql, params).fetchall()
         return [self._row_to_event(r) for r in rows]
 
+    def query_since(self, since: datetime, *, min_importance: str = "medium") -> list[Event]:
+        rank = {"low": 0, "medium": 1, "high": 2}
+        min_rank = rank.get(min_importance, 1)
+        allowed = [k for k, v in rank.items() if v >= min_rank]
+        placeholders = ",".join(["?"] * len(allowed))
+        sql = (
+            f"SELECT * FROM events WHERE published_at >= ? "
+            f"AND importance IN ({placeholders}) "
+            "ORDER BY ticker ASC, published_at DESC"
+        )
+        rows = self._conn.execute(sql, [since.isoformat(), *allowed]).fetchall()
+        return [self._row_to_event(r) for r in rows]
+
     def cleanup(self, retain_days: int) -> int:
         cur = self._conn.execute(
             f"DELETE FROM events WHERE created_at < datetime('now', '-{int(retain_days)} days')"

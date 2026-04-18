@@ -49,7 +49,20 @@
         <label class="check"><input type="checkbox" data-imp="medium" checked><span class="sig sig-med"></span><span>Medium</span></label>
         <label class="check"><input type="checkbox" data-imp="low"><span class="sig sig-low"></span><span>Low</span></label>
       </section>
+      <section class="panel">
+        <h2>Tools</h2>
+        <button id="btn-digest" class="tool-btn">📊 查看早报</button>
+        <button id="btn-backtest" class="tool-btn" title="回测历史事件">📈 事件回测</button>
+      </section>
     </aside>
+
+    <div id="modal" class="modal hidden" role="dialog" aria-modal="true">
+      <div class="modal-card">
+        <button id="modal-close" class="modal-close" aria-label="关闭">✕</button>
+        <h3 id="modal-title"></h3>
+        <div id="modal-body"></div>
+      </div>
+    </div>
     <section id="feed" aria-live="polite"></section>
   </main>
 

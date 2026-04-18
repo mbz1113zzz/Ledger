@@ -26,6 +26,11 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 BARK_URL = os.getenv("BARK_URL", "")
 FEISHU_WEBHOOK = os.getenv("FEISHU_WEBHOOK", "")
 
+DIGEST_ENABLED = os.getenv("DIGEST_ENABLED", "1") == "1"
+DIGEST_HOUR = int(os.getenv("DIGEST_HOUR", "13"))  # 13:00 UTC = 09:00 EDT pre-open
+DIGEST_MINUTE = int(os.getenv("DIGEST_MINUTE", "0"))
+DIGEST_LOOKBACK_HOURS = int(os.getenv("DIGEST_LOOKBACK_HOURS", "24"))
+
 HIGH_KEYWORDS = [
     "acquisition", "merger", "fda approval", "guidance",
     "ceo", "resign", "bankruptcy", "dividend", "buyback",

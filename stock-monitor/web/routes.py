@@ -7,8 +7,13 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
+import config
+from backtest import YahooPriceFetcher, run_backtest
+from digest import build_digest, send_digest
+from datetime import datetime, timedelta, timezone
 from notifier import Notifier
 from pipeline import Pipeline
+from pushers import PushHub
 from storage import Storage
 from watchlist_manager import WatchlistError, WatchlistManager
 
@@ -26,6 +31,7 @@ def build_router(
     watchlist: WatchlistManager,
     pipeline: Pipeline,
     price_pipeline: Pipeline,
+    push_hub: PushHub,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -83,6 +89,31 @@ def build_router(
         asyncio.create_task(pipeline.run_once())
         asyncio.create_task(price_pipeline.run_once())
         return {"status": "scheduled"}
+
+    @router.get("/api/digest")
+    async def preview_digest(hours: int = 24):
+        now = datetime.now(timezone.utc)
+        since = now - timedelta(hours=hours)
+        events = storage.query_since(since, min_importance="medium")
+        title, body = build_digest(events, now=now)
+        return {"title": title, "body": body, "count": len(events)}
+
+    @router.post("/api/digest/send")
+    async def trigger_digest(hours: int = 24):
+        if not push_hub.enabled:
+            raise HTTPException(status_code=400, detail="no push channels configured")
+        count = await send_digest(storage, push_hub, lookback_hours=hours)
+        return {"status": "sent", "count": count}
+
+    @router.get("/api/backtest")
+    async def backtest(ticker: str, event_type: str = "filing_8k",
+                        lookback_days: int = 365):
+        fetcher = YahooPriceFetcher()
+        return await run_backtest(
+            storage, fetcher,
+            ticker=ticker, event_type=event_type,
+            lookback_days=lookback_days,
+        )
 
     @router.get("/stream")
     async def stream(request: Request):
