@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 class FinnhubSource(Source):
     name = "finnhub"
     BASE_URL = "https://finnhub.io/api/v1"
-    EARNINGS_LOOKAHEAD_DAYS = 30
+    EARNINGS_LOOKAHEAD_DAYS = 90
 
     def __init__(self, api_key: str):
         self._api_key = api_key

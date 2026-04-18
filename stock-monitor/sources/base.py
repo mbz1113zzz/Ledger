@@ -16,6 +16,7 @@ class Event:
     published_at: datetime
     raw: dict[str, Any] = field(default_factory=dict)
     importance: str = "low"  # "high" | "medium" | "low"
+    summary_cn: str | None = None
 
 
 class Source(ABC):

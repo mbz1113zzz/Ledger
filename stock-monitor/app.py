@@ -7,7 +7,13 @@ from fastapi.staticfiles import StaticFiles
 
 import config
 from notifier import Notifier
-from scheduler import build_pipeline, start_scheduler
+from scheduler import (
+    build_enricher,
+    build_pipeline,
+    build_price_pipeline,
+    build_push_hub,
+    start_scheduler,
+)
 from sources.sec_edgar import SecEdgarSource
 from storage import Storage
 from watchlist_manager import WatchlistManager
@@ -31,12 +37,14 @@ async def lifespan(app: FastAPI):
     await sec_source.load_ticker_map()
 
     pipeline = app.state.pipeline
+    price_pipeline = app.state.price_pipeline
     try:
         await pipeline.run_once()
+        await price_pipeline.run_once()
     except Exception as e:
         log.exception("initial pipeline run failed: %s", e)
 
-    scheduler = start_scheduler(pipeline, storage)
+    scheduler = start_scheduler(pipeline, price_pipeline, storage)
     app.state.scheduler = scheduler
 
     log.info("startup complete on port %d", config.PORT)
@@ -49,7 +57,14 @@ def create_app() -> FastAPI:
     notifier = Notifier()
     watchlist = WatchlistManager(config.WATCHLIST_PATH)
     sec_source = SecEdgarSource()
-    pipeline = build_pipeline(storage, notifier, watchlist.tickers(), sec_source)
+    enricher = build_enricher()
+    push_hub = build_push_hub()
+    pipeline = build_pipeline(
+        storage, notifier, watchlist.tickers(), sec_source, enricher, push_hub,
+    )
+    price_pipeline = build_price_pipeline(
+        storage, notifier, watchlist.tickers(), push_hub,
+    )
 
     app = FastAPI(title="Stock Event Monitor", lifespan=lifespan)
     app.state.storage = storage
@@ -57,9 +72,10 @@ def create_app() -> FastAPI:
     app.state.watchlist = watchlist
     app.state.sec_source = sec_source
     app.state.pipeline = pipeline
+    app.state.price_pipeline = price_pipeline
 
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
-    app.include_router(build_router(storage, notifier, watchlist))
+    app.include_router(build_router(storage, notifier, watchlist, pipeline, price_pipeline))
     return app
 
 

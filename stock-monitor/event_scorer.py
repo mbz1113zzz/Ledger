@@ -3,7 +3,7 @@ from sources.base import Event
 
 
 def score(event: Event) -> str:
-    if event.event_type in ("filing_8k", "earnings"):
+    if event.event_type in ("filing_8k", "earnings", "price_alert"):
         return "high"
     if event.event_type == "news":
         text = (event.title + " " + (event.summary or "")).lower()

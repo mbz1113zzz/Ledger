@@ -18,6 +18,7 @@ CREATE TABLE IF NOT EXISTS events (
     url TEXT,
     published_at TIMESTAMP NOT NULL,
     importance TEXT NOT NULL,
+    summary_cn TEXT,
     raw_json TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(source, external_id)
@@ -35,6 +36,9 @@ class Storage:
 
     def init_schema(self) -> None:
         self._conn.executescript(SCHEMA)
+        cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(events)").fetchall()}
+        if "summary_cn" not in cols:
+            self._conn.execute("ALTER TABLE events ADD COLUMN summary_cn TEXT")
         self._conn.commit()
 
     def exists(self, source: str, external_id: str) -> bool:
@@ -50,8 +54,8 @@ class Storage:
             self._conn.execute(
                 """INSERT INTO events
                    (source, external_id, ticker, event_type, title, summary, url,
-                    published_at, importance, raw_json)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    published_at, importance, summary_cn, raw_json)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     event.source,
                     event.external_id,
@@ -62,6 +66,7 @@ class Storage:
                     event.url,
                     event.published_at.isoformat(),
                     event.importance,
+                    event.summary_cn,
                     json.dumps(event.raw),
                 ),
             )
@@ -98,6 +103,7 @@ class Storage:
         return cur.rowcount
 
     def _row_to_event(self, row: sqlite3.Row) -> Event:
+        keys = row.keys()
         return Event(
             source=row["source"],
             external_id=row["external_id"],
@@ -109,4 +115,5 @@ class Storage:
             published_at=datetime.fromisoformat(row["published_at"]),
             raw=json.loads(row["raw_json"] or "{}"),
             importance=row["importance"],
+            summary_cn=row["summary_cn"] if "summary_cn" in keys else None,
         )

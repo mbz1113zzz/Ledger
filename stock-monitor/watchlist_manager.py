@@ -1,5 +1,9 @@
 import json
+import re
 from pathlib import Path
+
+
+TICKER_RE = re.compile(r"^[A-Z][A-Z0-9.\-]{0,9}$")
 
 
 class WatchlistError(Exception):
@@ -24,3 +28,26 @@ class WatchlistManager:
 
     def tickers(self) -> list[str]:
         return list(self._tickers)
+
+    def add(self, ticker: str) -> str:
+        t = (ticker or "").strip().upper()
+        if not TICKER_RE.match(t):
+            raise WatchlistError(f"Invalid ticker: {ticker!r}")
+        if t in self._tickers:
+            raise WatchlistError(f"{t} already in watchlist")
+        self._tickers.append(t)
+        self._save()
+        return t
+
+    def remove(self, ticker: str) -> str:
+        t = (ticker or "").strip().upper()
+        if t not in self._tickers:
+            raise WatchlistError(f"{t} not in watchlist")
+        if len(self._tickers) == 1:
+            raise WatchlistError("cannot remove last ticker")
+        self._tickers.remove(t)
+        self._save()
+        return t
+
+    def _save(self) -> None:
+        self._path.write_text(json.dumps({"tickers": self._tickers}, indent=2))

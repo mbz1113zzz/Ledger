@@ -2,28 +2,57 @@
 <html lang="zh">
 <head>
   <meta charset="UTF-8">
-  <title>美股事件监控</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ledger — 美股事件监控</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body>
+<body data-theme="dark">
   <header>
-    <h1>美股事件监控</h1>
+    <div class="brand">
+      <span class="mark">◆</span>
+      <h1>Ledger <em>·</em> <span class="sub">美股事件监控</span></h1>
+      <span id="conn-dot" class="conn-dot" title="连接中" aria-label="连接状态"></span>
+    </div>
     <div class="controls">
-      <span id="summary"></span>
-      <label><input type="checkbox" id="notif-toggle"> 🔔 通知</label>
+      <span id="summary" class="summary"></span>
+      <button id="refresh-btn" class="icon-btn" title="立即刷新" aria-label="刷新">
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+      </button>
+      <button id="theme-toggle" class="icon-btn" title="切换主题" aria-label="切换主题">
+        <svg class="icon-moon" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="icon-sun" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+      </button>
+      <label class="notif">
+        <input type="checkbox" id="notif-toggle">
+        <span>提醒</span>
+      </label>
     </div>
   </header>
+
   <main>
     <aside>
-      <h2>Watchlist</h2>
-      <ul id="watchlist"></ul>
-      <h2>重要性筛选</h2>
-      <label><input type="checkbox" data-imp="high" checked> 🔴 高</label>
-      <label><input type="checkbox" data-imp="medium" checked> 🟡 中</label>
-      <label><input type="checkbox" data-imp="low"> 🟢 低</label>
+      <section class="panel">
+        <h2>Watchlist</h2>
+        <form id="add-form" class="add-form">
+          <input id="add-input" type="text" placeholder="TICKER" maxlength="10" autocomplete="off" spellcheck="false">
+          <button type="submit" aria-label="添加">＋</button>
+        </form>
+        <div id="add-error" class="error" role="alert"></div>
+        <ul id="watchlist"></ul>
+      </section>
+      <section class="panel">
+        <h2>Signal</h2>
+        <label class="check"><input type="checkbox" data-imp="high" checked><span class="sig sig-high"></span><span>High</span></label>
+        <label class="check"><input type="checkbox" data-imp="medium" checked><span class="sig sig-med"></span><span>Medium</span></label>
+        <label class="check"><input type="checkbox" data-imp="low"><span class="sig sig-low"></span><span>Low</span></label>
+      </section>
     </aside>
-    <section id="feed"></section>
+    <section id="feed" aria-live="polite"></section>
   </main>
+
   <script src="/static/app.js"></script>
 </body>
 </html>

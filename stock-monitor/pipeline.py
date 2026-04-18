@@ -2,8 +2,10 @@ import logging
 from dataclasses import asdict
 
 from deduplicator import Deduplicator
+from enricher import Enricher
 from event_scorer import score
 from notifier import Notifier
+from pushers import PushHub
 from sources.base import Event, Source
 from storage import Storage
 
@@ -17,12 +19,19 @@ class Pipeline:
         storage: Storage,
         notifier: Notifier,
         tickers: list[str],
+        enricher: Enricher | None = None,
+        push_hub: PushHub | None = None,
     ):
         self._sources = sources
         self._storage = storage
         self._notifier = notifier
         self._tickers = tickers
         self._dedup = Deduplicator(storage)
+        self._enricher = enricher
+        self._push_hub = push_hub
+
+    def set_tickers(self, tickers: list[str]) -> None:
+        self._tickers = tickers
 
     async def run_once(self) -> int:
         all_events: list[Event] = []
@@ -33,12 +42,22 @@ class Pipeline:
             except Exception as e:
                 log.exception("source %s failed: %s", src.name, e)
         fresh = self._dedup.filter_new(all_events)
-        inserted = 0
         for ev in fresh:
             ev.importance = score(ev)
+
+        if self._enricher and self._enricher.enabled:
+            await self._enricher.enrich(fresh)
+
+        inserted = 0
+        for ev in fresh:
             if self._storage.insert(ev):
                 inserted += 1
                 await self._notifier.publish(self._serialize(ev))
+                if ev.importance == "high" and self._push_hub and self._push_hub.enabled:
+                    try:
+                        await self._push_hub.broadcast(ev)
+                    except Exception as e:
+                        log.warning("push broadcast failed: %s", e)
         log.info("pipeline inserted %d events", inserted)
         return inserted
 

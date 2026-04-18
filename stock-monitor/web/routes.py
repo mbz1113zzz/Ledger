@@ -3,19 +3,29 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from pydantic import BaseModel
 
 from notifier import Notifier
+from pipeline import Pipeline
 from storage import Storage
-from watchlist_manager import WatchlistManager
+from watchlist_manager import WatchlistError, WatchlistManager
+
+
+class TickerPayload(BaseModel):
+    ticker: str
 
 
 STATIC_DIR = Path(__file__).parent / "static"
 
 
 def build_router(
-    storage: Storage, notifier: Notifier, watchlist: WatchlistManager
+    storage: Storage,
+    notifier: Notifier,
+    watchlist: WatchlistManager,
+    pipeline: Pipeline,
+    price_pipeline: Pipeline,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -42,9 +52,37 @@ def build_router(
     async def get_watchlist():
         return {"tickers": watchlist.tickers()}
 
+    @router.post("/api/watchlist")
+    async def add_ticker(payload: TickerPayload):
+        try:
+            t = watchlist.add(payload.ticker)
+        except WatchlistError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        pipeline.set_tickers(watchlist.tickers())
+        price_pipeline.set_tickers(watchlist.tickers())
+        asyncio.create_task(pipeline.run_once())
+        asyncio.create_task(price_pipeline.run_once())
+        return {"tickers": watchlist.tickers(), "added": t}
+
+    @router.delete("/api/watchlist/{ticker}")
+    async def remove_ticker(ticker: str):
+        try:
+            t = watchlist.remove(ticker)
+        except WatchlistError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        pipeline.set_tickers(watchlist.tickers())
+        price_pipeline.set_tickers(watchlist.tickers())
+        return {"tickers": watchlist.tickers(), "removed": t}
+
     @router.get("/healthz")
     async def health():
         return {"status": "ok"}
+
+    @router.post("/api/refresh")
+    async def refresh():
+        asyncio.create_task(pipeline.run_once())
+        asyncio.create_task(price_pipeline.run_once())
+        return {"status": "scheduled"}
 
     @router.get("/stream")
     async def stream(request: Request):
