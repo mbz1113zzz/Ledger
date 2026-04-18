@@ -46,7 +46,7 @@
 | Task 1 Scaffolding | ✅ 完成 | `8dde576` | — |
 | Batch A (Tasks 2–6) | ✅ 完成 | `867219d` | 23/23 |
 | Batch B (Tasks 7–9) | ✅ 完成 | `ce30dfe` | 33/33 |
-| Batch C (Tasks 10–12) | ⬜ 未开始 | — | — |
+| Batch C (Tasks 10–12) | ✅ 完成 | `89d93b1` | 38/38 |
 | Batch D (Tasks 13–15) | ⬜ 未开始 | — | — |
 | Task 16 E2E | ⬜ 未开始 | — | — |
 | Final review | ⬜ 未开始 | — | — |
@@ -94,22 +94,22 @@ Subagent 的 prompt 必须包含：
 
 ---
 
-## Batch C 下一步 TL;DR
-
-参照 plan 的 Tasks 10、11、12：
-- `notifier.py` + `test_notifier.py`（SSE pub/sub，3 个测试）
-- `pipeline.py` + `test_pipeline.py`（编排，2 个测试）
-- `scheduler.py`（无单测，整合用）
-- 预期测试总数达到 **38**（33 + 3 notifier + 2 pipeline）
-
----
-
-## 完成后 Batch D TL;DR
+## Batch D 下一步 TL;DR
 
 参照 plan 的 Tasks 13、14、15：
-- `web/routes.py`（FastAPI 路由，无单测）
-- `web/static/index.html`, `style.css`, `app.js`（Dashboard UI）
-- `app.py`（主入口，lifespan 启动调度器）
+- `web/routes.py`（FastAPI 路由：`/`, `/api/events`, `/api/watchlist`, `/healthz`, `/stream` SSE）
+- `web/static/index.html` + `style.css` + `app.js`（Dashboard UI，SSE 客户端 + 浏览器通知）
+- `app.py`（FastAPI 主入口，`lifespan` 启动时 init storage、加载 SEC ticker map、首次运行 pipeline、启动调度器）
+- 无新增单元测试；靠 Task 16 端到端验证
+
+## 完成后 Task 16 TL;DR
+
+端到端手工验证：
+1. `cd stock-monitor && PYTHONPATH=. ~/miniconda3/envs/stock-monitor/bin/python app.py`
+2. 浏览器访问 `http://localhost:8000`
+3. 验证 `/healthz`, `/api/events`, `/api/watchlist`, `/stream` 四个端点
+4. 勾选🔔通知，授权浏览器权限
+5. 重启看去重是否生效
 
 ---
 
