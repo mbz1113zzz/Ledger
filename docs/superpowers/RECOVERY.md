@@ -47,8 +47,9 @@
 | Batch A (Tasks 2–6) | ✅ 完成 | `867219d` | 23/23 |
 | Batch B (Tasks 7–9) | ✅ 完成 | `ce30dfe` | 33/33 |
 | Batch C (Tasks 10–12) | ✅ 完成 | `89d93b1` | 38/38 |
-| Batch D (Tasks 13–15) | ⬜ 未开始 | — | — |
-| Task 16 E2E | ⬜ 未开始 | — | — |
+| Batch D (Tasks 13–15) | ✅ 完成 | `0de271a` | 38/38（无新增） |
+| yfinance → Finnhub earnings | ✅ 完成 | `842491f` | 37/37 |
+| Task 16 E2E | ⏳ 进行中 | — | — |
 | Final review | ⬜ 未开始 | — | — |
 
 **随时核对进度：**
