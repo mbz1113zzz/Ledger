@@ -142,6 +142,13 @@ def build_router(
             lookback_days=lookback_days,
         )
 
+    @router.get("/api/smc/structure")
+    async def smc_structure(ticker: str | None = None,
+                            kind: str | None = None,
+                            limit: int = 200):
+        rows = storage.query_smc_structure(ticker=ticker, kind=kind, limit=limit)
+        return {"events": rows}
+
     @router.get("/stream")
     async def stream(request: Request):
         queue = await notifier.subscribe()
