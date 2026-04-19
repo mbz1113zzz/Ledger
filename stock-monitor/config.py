@@ -18,7 +18,15 @@ RETAIN_DAYS = 30
 PORT = 8000
 SEC_USER_AGENT = "stock-monitor research@example.com"  # SEC requires a UA
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-ENRICH_MODEL = os.getenv("ENRICH_MODEL", "claude-haiku-4-5-20251001")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+ENRICH_PROVIDER = os.getenv(
+    "ENRICH_PROVIDER",
+    "deepseek" if os.getenv("DEEPSEEK_API_KEY") else "anthropic",
+).lower()
+ENRICH_MODEL = os.getenv(
+    "ENRICH_MODEL",
+    "deepseek-chat" if ENRICH_PROVIDER == "deepseek" else "claude-haiku-4-5-20251001",
+)
 ENRICH_ONLY_HIGH = os.getenv("ENRICH_ONLY_HIGH", "1") == "1"
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")

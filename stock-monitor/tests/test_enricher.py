@@ -73,3 +73,24 @@ async def test_api_failure_doesnt_crash():
     with patch.object(enr, "_call", new=boom):
         await enr.enrich([ev])
     assert ev.summary_cn is None
+
+
+@pytest.mark.asyncio
+async def test_deepseek_provider_parses_openai_format():
+    enr = Enricher(api_key="k", provider="deepseek", model="deepseek-chat")
+    ev = _event()
+
+    class FakeResp:
+        def raise_for_status(self): pass
+        def json(self):
+            return {"choices": [{"message": {"content": "DeepSeek 中文摘要"}}]}
+
+    class FakeClient:
+        async def post(self, url, headers=None, json=None):
+            assert url == "https://api.deepseek.com/chat/completions"
+            assert headers["Authorization"] == "Bearer k"
+            assert json["model"] == "deepseek-chat"
+            return FakeResp()
+
+    await enr._enrich_one(FakeClient(), ev)
+    assert ev.summary_cn == "DeepSeek 中文摘要"

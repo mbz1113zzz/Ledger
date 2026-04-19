@@ -20,9 +20,14 @@ log = logging.getLogger(__name__)
 
 
 def build_enricher() -> Enricher:
+    provider = config.ENRICH_PROVIDER
+    api_key = (
+        config.DEEPSEEK_API_KEY if provider == "deepseek" else config.ANTHROPIC_API_KEY
+    )
     return Enricher(
-        api_key=config.ANTHROPIC_API_KEY,
+        api_key=api_key,
         model=config.ENRICH_MODEL,
+        provider=provider,
         only_high=config.ENRICH_ONLY_HIGH,
     )
 

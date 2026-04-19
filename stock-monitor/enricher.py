@@ -1,6 +1,10 @@
-"""LLM-based enricher: Chinese TL;DR + (optional) importance re-scoring.
+"""LLM-based enricher: Chinese TL;DR.
 
-Gracefully no-op when ANTHROPIC_API_KEY is not configured.
+Supports two providers:
+- anthropic (Claude Messages API)
+- deepseek  (OpenAI-compatible Chat Completions API)
+
+Gracefully no-op when no API key is configured.
 """
 import asyncio
 import logging
@@ -12,9 +16,9 @@ from sources.base import Event
 
 log = logging.getLogger(__name__)
 
-API_URL = "https://api.anthropic.com/v1/messages"
-API_VERSION = "2023-06-01"
-DEFAULT_MODEL = "claude-haiku-4-5-20251001"
+ANTHROPIC_URL = "https://api.anthropic.com/v1/messages"
+ANTHROPIC_VERSION = "2023-06-01"
+DEEPSEEK_URL = "https://api.deepseek.com/chat/completions"
 
 PROMPT = (
     "你是美股事件助理。用 1-2 句中文总结下面的事件，"
@@ -31,12 +35,14 @@ class Enricher:
     def __init__(
         self,
         api_key: str,
-        model: str = DEFAULT_MODEL,
+        model: str = "claude-haiku-4-5-20251001",
+        provider: str = "anthropic",
         only_high: bool = True,
         concurrency: int = 4,
     ):
         self._api_key = api_key
         self._model = model
+        self._provider = provider.lower()
         self._only_high = only_high
         self._sem = asyncio.Semaphore(concurrency)
 
@@ -77,11 +83,16 @@ class Enricher:
             title=ev.title,
             summary=(ev.summary or "")[:800],
         )
+        if self._provider == "deepseek":
+            return await self._call_deepseek(client, prompt)
+        return await self._call_anthropic(client, prompt)
+
+    async def _call_anthropic(self, client: httpx.AsyncClient, prompt: str) -> str:
         resp = await client.post(
-            API_URL,
+            ANTHROPIC_URL,
             headers={
                 "x-api-key": self._api_key,
-                "anthropic-version": API_VERSION,
+                "anthropic-version": ANTHROPIC_VERSION,
                 "content-type": "application/json",
             },
             json={
@@ -95,3 +106,24 @@ class Enricher:
         blocks = data.get("content") or []
         parts = [b.get("text", "") for b in blocks if b.get("type") == "text"]
         return "".join(parts).strip()
+
+    async def _call_deepseek(self, client: httpx.AsyncClient, prompt: str) -> str:
+        resp = await client.post(
+            DEEPSEEK_URL,
+            headers={
+                "Authorization": f"Bearer {self._api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": self._model,
+                "max_tokens": 200,
+                "messages": [{"role": "user", "content": prompt}],
+                "stream": False,
+            },
+        )
+        resp.raise_for_status()
+        data: dict[str, Any] = resp.json()
+        choices = data.get("choices") or []
+        if not choices:
+            return ""
+        return (choices[0].get("message") or {}).get("content", "").strip()
