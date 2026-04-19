@@ -25,6 +25,18 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS idx_ticker_time ON events(ticker, published_at DESC);
 CREATE INDEX IF NOT EXISTS idx_importance_time ON events(importance, published_at DESC);
+
+CREATE TABLE IF NOT EXISTS smc_structure (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TIMESTAMP NOT NULL,
+    ticker TEXT NOT NULL,
+    tf TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    price REAL NOT NULL,
+    ref_id INTEGER,
+    meta_json TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_smc_ticker_ts ON smc_structure(ticker, ts DESC);
 """
 
 
@@ -119,6 +131,41 @@ class Storage:
         )
         self._conn.commit()
         return cur.rowcount
+
+    def insert_smc_structure(
+        self, *, ticker: str, tf: str, kind: str, price: float,
+        ts: datetime, ref_id: int | None = None, meta: dict | None = None,
+    ) -> int:
+        cur = self._conn.execute(
+            """INSERT INTO smc_structure (ts, ticker, tf, kind, price, ref_id, meta_json)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (ts.isoformat(), ticker, tf, kind, price, ref_id,
+             json.dumps(meta or {})),
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def query_smc_structure(
+        self, *, ticker: str | None = None, kind: str | None = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        sql = "SELECT * FROM smc_structure WHERE 1=1"
+        params: list = []
+        if ticker:
+            sql += " AND ticker = ?"
+            params.append(ticker)
+        if kind:
+            sql += " AND kind = ?"
+            params.append(kind)
+        sql += " ORDER BY ts DESC LIMIT ?"
+        params.append(limit)
+        rows = self._conn.execute(sql, params).fetchall()
+        out = []
+        for r in rows:
+            d = dict(r)
+            d["meta"] = json.loads(d.pop("meta_json") or "{}")
+            out.append(d)
+        return out
 
     def _row_to_event(self, row: sqlite3.Row) -> Event:
         keys = row.keys()
