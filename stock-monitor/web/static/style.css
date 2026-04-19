@@ -575,3 +575,20 @@ aside h2 {
   padding: 6px 8px; line-height: 1.6; letter-spacing: .02em; }
 .sources-meta .ch { color: var(--low); }
 .sources-meta .ch-off { color: var(--faint); }
+
+/* SMC structure badges on live feed */
+.struct-badge {
+  padding: 4px 8px;
+  margin: 4px 0;
+  border-left: 3px solid #999;
+  font-family: var(--f-mono, monospace);
+  font-size: 12px;
+  opacity: 0.85;
+  background: rgba(120,120,120,.05);
+}
+.struct-bos_up, .struct-choch_up { border-left-color: #4caf50; }
+.struct-bos_down, .struct-choch_down { border-left-color: #e53935; }
+.struct-ob_bull { border-left-color: #2196f3; }
+.struct-ob_bear { border-left-color: #ab47bc; }
+.struct-liq_sweep_high, .struct-liq_sweep_low { border-left-color: #ff9800; }
+.struct-swing_high, .struct-swing_low { border-left-color: #9e9e9e; opacity: 0.6; }

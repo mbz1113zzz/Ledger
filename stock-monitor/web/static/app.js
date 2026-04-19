@@ -227,12 +227,27 @@ async function loadHistory() {
   await loadWatchlist();
 }
 
+function appendStructureBadge(s) {
+  const div = document.createElement('div');
+  div.className = 'struct-badge struct-' + s.kind;
+  const t = new Date(s.ts).toLocaleTimeString('zh-CN',
+    { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+  const price = typeof s.price === 'number' ? s.price.toFixed(2) : s.price;
+  div.textContent = `${t} · ${s.ticker} ${s.tf} · ${String(s.kind).toUpperCase()} @ ${price}`;
+  feed.prepend(div);
+}
+
 /* ---------- SSE ---------- */
 function connectStream() {
   const es = new EventSource('/stream');
   es.onopen = () => connDot.classList.remove('bad');
   es.onmessage = (msg) => {
-    const ev = JSON.parse(msg.data);
+    const data = JSON.parse(msg.data);
+    if (data.type === 'structure') {
+      appendStructureBadge(data);
+      return;
+    }
+    const ev = data;
     allEvents.unshift(ev);
     if (allEvents.length > MAX_EVENTS) allEvents.length = MAX_EVENTS;
     render();
