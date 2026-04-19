@@ -39,6 +39,22 @@ DIGEST_HOUR = int(os.getenv("DIGEST_HOUR", "13"))  # 13:00 UTC = 09:00 EDT pre-o
 DIGEST_MINUTE = int(os.getenv("DIGEST_MINUTE", "0"))
 DIGEST_LOOKBACK_HOURS = int(os.getenv("DIGEST_LOOKBACK_HOURS", "24"))
 
+# IBKR realtime
+IBKR_ENABLED = os.getenv("IBKR_ENABLED", "1") == "1"
+IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
+IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))
+IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "42"))
+
+# Tiered anomaly detection (independent alert channel)
+ANOMALY_TIERS = [("low", 0.005), ("medium", 0.01), ("high", 0.03)]
+ANOMALY_COOLDOWN_SEC = 300
+
+# SMC
+SMC_STRUCTURE_TF = "5m"
+SMC_ENTRY_TF = "1m"
+SMC_FRACTAL_WINDOW = 5
+SMC_OB_MAX_AGE_MIN = 120
+
 HIGH_KEYWORDS = [
     "acquisition", "merger", "fda approval", "guidance",
     "ceo", "resign", "bankruptcy", "dividend", "buyback",
