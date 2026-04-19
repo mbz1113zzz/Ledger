@@ -16,6 +16,7 @@ from scheduler import (
 )
 from sources.sec_edgar import SecEdgarSource
 from storage import Storage
+from streaming.runner import build_runner_if_enabled
 from watchlist_manager import WatchlistManager
 from web.routes import build_router
 
@@ -48,8 +49,26 @@ async def lifespan(app: FastAPI):
                                  push_hub=app.state.push_hub)
     app.state.scheduler = scheduler
 
+    watchlist: WatchlistManager = app.state.watchlist
+    runner = build_runner_if_enabled(
+        storage=storage, notifier=app.state.notifier,
+        push_hub=app.state.push_hub, tickers=watchlist.tickers(),
+    )
+    app.state.streaming_runner = runner
+    if runner is not None:
+        try:
+            await runner.start()
+            log.info("streaming runner started (IBKR)")
+        except Exception as e:
+            log.warning("streaming runner start failed: %s", e)
+
     log.info("startup complete on port %d", config.PORT)
     yield
+    if runner is not None:
+        try:
+            await runner.stop()
+        except Exception:
+            pass
     scheduler.shutdown()
 
 
