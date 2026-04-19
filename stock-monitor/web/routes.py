@@ -105,12 +105,13 @@ def build_router(
         count = await send_digest(storage, push_hub, lookback_hours=hours)
         return {"status": "sent", "count": count}
 
+    _price_fetcher = YahooPriceFetcher()
+
     @router.get("/api/backtest")
     async def backtest(ticker: str, event_type: str = "filing_8k",
                         lookback_days: int = 365):
-        fetcher = YahooPriceFetcher()
         return await run_backtest(
-            storage, fetcher,
+            storage, _price_fetcher,
             ticker=ticker, event_type=event_type,
             lookback_days=lookback_days,
         )

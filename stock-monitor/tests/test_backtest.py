@@ -3,7 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from backtest import compute_stats, run_backtest
+from unittest.mock import AsyncMock, patch
+
+from backtest import YahooPriceFetcher, compute_stats, run_backtest
 from sources.base import Event
 from storage import Storage
 
@@ -66,6 +68,33 @@ def _event(ticker, etype, when):
         ticker=ticker, event_type=etype, title=f"{ticker} {etype}",
         summary=None, url=None, published_at=when, raw={}, importance="high",
     )
+
+
+@pytest.mark.asyncio
+async def test_yahoo_fetcher_caches_response():
+    f = YahooPriceFetcher()
+    fake_resp = {"chart": {"result": [{
+        "timestamp": [1712707200],
+        "indicators": {"quote": [{"close": [100.0]}]},
+    }]}}
+
+    class FakeResp:
+        def raise_for_status(self): pass
+        def json(self): return fake_resp
+
+    call_count = 0
+
+    async def fake_get(*a, **kw):
+        nonlocal call_count
+        call_count += 1
+        return FakeResp()
+
+    with patch("httpx.AsyncClient") as mock_client:
+        instance = mock_client.return_value.__aenter__.return_value
+        instance.get = fake_get
+        await f.daily_closes("NVDA", date(2026, 4, 1), date(2026, 4, 30))
+        await f.daily_closes("NVDA", date(2026, 4, 1), date(2026, 4, 30))
+    assert call_count == 1
 
 
 @pytest.mark.asyncio

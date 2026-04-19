@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 
 from sources.base import Event, Source
+from sources.health import SourceHealth
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class SentimentSource(Source):
 
     def __init__(self, api_key: str):
         self._api_key = api_key
+        self._health = SourceHealth(self.name)
 
     async def _get(self, client: httpx.AsyncClient, ticker: str) -> Any:
         resp = await client.get(
@@ -32,13 +34,21 @@ class SentimentSource(Source):
         return resp.json()
 
     async def fetch(self, tickers: list[str]) -> list[Event]:
-        if not self._api_key:
+        if not self._api_key or self._health.disabled:
             return []
         events: list[Event] = []
         async with httpx.AsyncClient(timeout=15.0) as client:
             for ticker in tickers:
                 try:
                     data = await self._get(client, ticker)
+                    self._health.record_success()
+                except httpx.HTTPStatusError as e:
+                    if 400 <= e.response.status_code < 500:
+                        self._health.record_4xx(e.response.status_code)
+                        if self._health.disabled:
+                            return events
+                    log.warning("sentiment fetch failed for %s: %s", ticker, e)
+                    continue
                 except Exception as e:
                     log.warning("sentiment fetch failed for %s: %s", ticker, e)
                     continue

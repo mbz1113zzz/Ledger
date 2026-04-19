@@ -17,13 +17,25 @@ class SecEdgarSource(Source):
 
     def __init__(self):
         self._ticker_to_cik: dict[str, str] = {}
+        self._client: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        if self._client is None or self._client.is_closed:
+            self._client = httpx.AsyncClient(
+                timeout=20.0,
+                headers={"User-Agent": SEC_USER_AGENT},
+                limits=httpx.Limits(max_keepalive_connections=5, max_connections=10),
+            )
+        return self._client
+
+    async def aclose(self) -> None:
+        if self._client is not None and not self._client.is_closed:
+            await self._client.aclose()
 
     async def _get(self, url: str) -> Any:
-        headers = {"User-Agent": SEC_USER_AGENT}
-        async with httpx.AsyncClient(timeout=20.0, headers=headers) as client:
-            resp = await client.get(url)
-            resp.raise_for_status()
-            return resp.json()
+        resp = await self._get_client().get(url)
+        resp.raise_for_status()
+        return resp.json()
 
     async def load_ticker_map(self) -> None:
         try:

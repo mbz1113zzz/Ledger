@@ -12,6 +12,7 @@ const impChecks = document.querySelectorAll('aside input[data-imp]');
 let selectedTicker = null;
 let allEvents = [];
 let watchlistCache = [];
+const MAX_EVENTS = 1000;
 
 /* ---------- theme ---------- */
 const savedTheme = localStorage.getItem('theme') || 'dark';
@@ -233,6 +234,7 @@ function connectStream() {
   es.onmessage = (msg) => {
     const ev = JSON.parse(msg.data);
     allEvents.unshift(ev);
+    if (allEvents.length > MAX_EVENTS) allEvents.length = MAX_EVENTS;
     render();
     if (ev.importance === 'high' && notifToggle.checked
         && Notification.permission === 'granted') {

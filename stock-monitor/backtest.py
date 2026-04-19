@@ -22,12 +22,26 @@ class PriceFetcher(Protocol):
 
 
 class YahooPriceFetcher:
-    """Unofficial Yahoo Finance chart API — no key, daily closes."""
+    """Unofficial Yahoo Finance chart API — no key, daily closes.
+
+    Responses are cached in-memory for CACHE_TTL_SECS since daily close data
+    doesn't change intraday and backtest can be triggered repeatedly from UI.
+    """
     BASE = "https://query1.finance.yahoo.com/v8/finance/chart"
+    CACHE_TTL_SECS = 3600
+
+    def __init__(self):
+        self._cache: dict[tuple[str, date, date], tuple[float, dict[date, float]]] = {}
 
     async def daily_closes(
         self, ticker: str, start: date, end: date
     ) -> dict[date, float]:
+        import time as _time
+        key = (ticker.upper(), start, end)
+        now = _time.time()
+        hit = self._cache.get(key)
+        if hit and now - hit[0] < self.CACHE_TTL_SECS:
+            return hit[1]
         p1 = int(datetime.combine(start, datetime.min.time(), timezone.utc).timestamp())
         p2 = int(datetime.combine(end, datetime.min.time(), timezone.utc).timestamp())
         async with httpx.AsyncClient(timeout=15.0) as client:
@@ -50,6 +64,7 @@ class YahooPriceFetcher:
                 continue
             d = datetime.fromtimestamp(t, tz=timezone.utc).date()
             result[d] = float(c)
+        self._cache[key] = (now, result)
         return result
 
 
