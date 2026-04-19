@@ -1,5 +1,6 @@
 import logging
 from dataclasses import asdict
+from datetime import datetime, timezone
 
 from deduplicator import Deduplicator
 from enricher import Enricher
@@ -29,6 +30,16 @@ class Pipeline:
         self._dedup = Deduplicator(storage)
         self._enricher = enricher
         self._push_hub = push_hub
+        self.last_run_at: datetime | None = None
+        self.last_run_inserted: int = 0
+
+    @property
+    def sources(self) -> list[Source]:
+        return self._sources
+
+    @property
+    def enricher(self) -> Enricher | None:
+        return self._enricher
 
     def set_tickers(self, tickers: list[str]) -> None:
         self._tickers = tickers
@@ -58,6 +69,8 @@ class Pipeline:
                         await self._push_hub.broadcast(ev)
                     except Exception as e:
                         log.warning("push broadcast failed: %s", e)
+        self.last_run_at = datetime.now(timezone.utc)
+        self.last_run_inserted = inserted
         log.info("pipeline inserted %d events", inserted)
         return inserted
 

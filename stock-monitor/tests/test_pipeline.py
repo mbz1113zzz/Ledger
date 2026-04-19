@@ -57,3 +57,20 @@ async def test_pipeline_skips_duplicates(storage):
     pipe = Pipeline(sources=[src], storage=storage, notifier=notifier, tickers=["EOSE"])
     assert await pipe.run_once() == 1
     assert await pipe.run_once() == 0
+
+
+@pytest.mark.asyncio
+async def test_pipeline_tracks_last_run_state(storage):
+    notifier = Notifier()
+    src = FakeSource([_event("x"), _event("y")])
+    pipe = Pipeline(sources=[src], storage=storage, notifier=notifier, tickers=["EOSE"])
+    assert pipe.last_run_at is None
+    await pipe.run_once()
+    assert pipe.last_run_at is not None
+    assert pipe.last_run_inserted == 2
+    assert pipe.sources == [src]
+
+
+def test_storage_enables_wal_mode(storage):
+    row = storage._conn.execute("PRAGMA journal_mode").fetchone()
+    assert row[0].lower() == "wal"

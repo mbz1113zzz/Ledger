@@ -35,6 +35,11 @@ class Storage:
         self._conn.row_factory = sqlite3.Row
 
     def init_schema(self) -> None:
+        # WAL mode: readers never block writers; enables concurrent access
+        # between the scheduler thread and FastAPI request threads.
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
+        self._conn.execute("PRAGMA busy_timeout=5000")
         self._conn.executescript(SCHEMA)
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(events)").fetchall()}
         if "summary_cn" not in cols:

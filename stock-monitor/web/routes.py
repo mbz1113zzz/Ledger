@@ -84,6 +84,32 @@ def build_router(
     async def health():
         return {"status": "ok"}
 
+    @router.get("/api/health")
+    async def health_detail():
+        def src_status(s):
+            h = getattr(s, "_health", None)
+            if h is not None:
+                return "disabled" if h.disabled else "ok"
+            return "ok"
+
+        sources = []
+        for s in pipeline.sources:
+            sources.append({"name": s.name, "group": "news", "status": src_status(s)})
+        for s in price_pipeline.sources:
+            sources.append({"name": s.name, "group": "price", "status": src_status(s)})
+
+        enricher = pipeline.enricher
+        return {
+            "status": "ok",
+            "sources": sources,
+            "push_channels": [p.name for p in push_hub._pushers] if push_hub.enabled else [],
+            "enricher_enabled": bool(enricher and enricher.enabled),
+            "last_news_run": pipeline.last_run_at.isoformat() if pipeline.last_run_at else None,
+            "last_news_inserted": pipeline.last_run_inserted,
+            "last_price_run": price_pipeline.last_run_at.isoformat() if price_pipeline.last_run_at else None,
+            "last_price_inserted": price_pipeline.last_run_inserted,
+        }
+
     @router.post("/api/refresh")
     async def refresh():
         asyncio.create_task(pipeline.run_once())

@@ -346,8 +346,42 @@ async function loadBacktest(ticker, eventType) {
   }
 }
 
+/* ---------- sources health ---------- */
+async function loadHealth() {
+  try {
+    const r = await fetch('/api/health');
+    const d = await r.json();
+    renderSources(d);
+  } catch (e) { /* silent */ }
+}
+
+function renderSources(d) {
+  const ul = document.getElementById('sources-list');
+  ul.innerHTML = (d.sources || []).map(s => `
+    <li>
+      <span class="dot ${s.status === 'ok' ? 'ok' : 'disabled'}"></span>
+      <span>${s.name}</span>
+      <span class="group">${s.group}</span>
+    </li>
+  `).join('');
+  const meta = document.getElementById('sources-meta');
+  const channels = ['telegram', 'bark', 'feishu'].map(n => {
+    const on = (d.push_channels || []).includes(n);
+    return `<span class="${on ? 'ch' : 'ch-off'}">${n}${on ? '✓' : '✗'}</span>`;
+  }).join(' ');
+  const enr = d.enricher_enabled ? '<span class="ch">LLM✓</span>' : '<span class="ch-off">LLM✗</span>';
+  let lastLine = '';
+  if (d.last_news_run) {
+    const mins = Math.floor((Date.now() - new Date(d.last_news_run).getTime()) / 60000);
+    lastLine = `上次 news: ${mins}m 前 (+${d.last_news_inserted})`;
+  }
+  meta.innerHTML = `${channels}<br>${enr}<br>${lastLine}`;
+}
+
 /* ---------- boot ---------- */
 (async () => {
   await loadHistory();
+  await loadHealth();
+  setInterval(loadHealth, 30000);
   connectStream();
 })();
