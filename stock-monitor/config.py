@@ -7,13 +7,17 @@ load_dotenv(ROOT.parent / ".env")
 
 FINNHUB_API_KEY = os.getenv("FINNHUB_API_KEY", "")
 FINNHUB_INTERVAL_MINUTES = 5
+FINNHUB_ENABLE_NEWS = os.getenv("FINNHUB_ENABLE_NEWS", "1") == "1"
+FINNHUB_ENABLE_EARNINGS = os.getenv("FINNHUB_ENABLE_EARNINGS", "1") == "1"
+FINNHUB_ENABLE_ANALYST = os.getenv("FINNHUB_ENABLE_ANALYST", "0") == "1"
+FINNHUB_ENABLE_SENTIMENT = os.getenv("FINNHUB_ENABLE_SENTIMENT", "0") == "1"
 SEC_INTERVAL_MINUTES = 5
 PRICE_POLL_INTERVAL_MINUTES = 2
 PRICE_ALERT_THRESHOLD_PCT = 3.0
 EARNINGS_CALENDAR_HOUR = 0  # run at 00:05 local time
 EARNINGS_CALENDAR_MINUTE = 5
-DB_PATH = str(ROOT / "data" / "events.db")
-WATCHLIST_PATH = str(ROOT / "watchlist.json")
+DB_PATH = os.getenv("DB_PATH", str(ROOT / "data" / "events.db"))
+WATCHLIST_PATH = os.getenv("WATCHLIST_PATH", str(ROOT / "watchlist.json"))
 RETAIN_DAYS = 30
 PORT = 8000
 SEC_USER_AGENT = "stock-monitor research@example.com"  # SEC requires a UA
@@ -44,6 +48,7 @@ IBKR_ENABLED = os.getenv("IBKR_ENABLED", "1") == "1"
 IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
 IBKR_PORT = int(os.getenv("IBKR_PORT", "7497"))
 IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "42"))
+IBKR_STARTUP_TIMEOUT_SEC = float(os.getenv("IBKR_STARTUP_TIMEOUT_SEC", "5"))
 
 # Tiered anomaly detection (independent alert channel)
 ANOMALY_TIERS = [("low", 0.005), ("medium", 0.01), ("high", 0.03)]
@@ -54,6 +59,24 @@ SMC_STRUCTURE_TF = "5m"
 SMC_ENTRY_TF = "1m"
 SMC_FRACTAL_WINDOW = 5
 SMC_OB_MAX_AGE_MIN = 120
+SMC_MAX_RISK_PCT = float(os.getenv("SMC_MAX_RISK_PCT", "0.015"))
+SMC_MIN_RR = float(os.getenv("SMC_MIN_RR", "2.0"))
+SMC_TICK_SIZE = float(os.getenv("SMC_TICK_SIZE", "0.01"))
+
+# Paper broker
+PAPER_ENABLED = os.getenv("PAPER_ENABLED", "1") == "1"
+PAPER_INITIAL_CASH = float(os.getenv("PAPER_INITIAL_CASH", "10000"))
+PAPER_MAX_POSITION_PCT = float(os.getenv("PAPER_MAX_POSITION_PCT", "0.20"))
+PAPER_MAX_RISK_PER_TRADE_PCT = float(
+    os.getenv("PAPER_MAX_RISK_PER_TRADE_PCT", "0.01")
+)
+PAPER_MAX_HOLD_MIN = int(os.getenv("PAPER_MAX_HOLD_MIN", "60"))
+PAPER_BREAK_EVEN_ENABLED = os.getenv("PAPER_BREAK_EVEN_ENABLED", "1") == "1"
+PAPER_BREAK_EVEN_R = float(os.getenv("PAPER_BREAK_EVEN_R", "1.0"))
+PAPER_EOD_HOUR_ET = int(os.getenv("PAPER_EOD_HOUR_ET", "15"))
+PAPER_EOD_MINUTE_ET = int(os.getenv("PAPER_EOD_MINUTE_ET", "50"))
+REVIEW_HOUR_ET = int(os.getenv("REVIEW_HOUR_ET", "16"))
+REVIEW_MINUTE_ET = int(os.getenv("REVIEW_MINUTE_ET", "15"))
 
 HIGH_KEYWORDS = [
     "acquisition", "merger", "fda approval", "guidance",

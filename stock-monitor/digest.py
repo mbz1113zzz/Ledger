@@ -59,12 +59,13 @@ async def send_digest(
     *,
     lookback_hours: int = 24,
     min_importance: str = "medium",
+    now: datetime | None = None,
 ) -> int:
     """Query recent events and broadcast a digest. Returns event count."""
     if not push_hub.enabled:
         log.info("digest skipped: no push channels enabled")
         return 0
-    now = datetime.now(timezone.utc)
+    now = now or datetime.now(timezone.utc)
     since = now - timedelta(hours=lookback_hours)
     events = storage.query_since(since, min_importance=min_importance)
     title, body = build_digest(events, now=now)

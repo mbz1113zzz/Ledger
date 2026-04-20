@@ -37,6 +37,42 @@ CREATE TABLE IF NOT EXISTS smc_structure (
     meta_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_smc_ticker_ts ON smc_structure(ticker, ts DESC);
+
+CREATE TABLE IF NOT EXISTS paper_trades (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts TIMESTAMP NOT NULL,
+    ticker TEXT NOT NULL,
+    side TEXT NOT NULL,
+    qty INTEGER NOT NULL,
+    price REAL NOT NULL,
+    reason TEXT NOT NULL,
+    pnl REAL,
+    signal_id INTEGER,
+    rr REAL
+);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_ts ON paper_trades(ts DESC);
+CREATE INDEX IF NOT EXISTS idx_paper_trades_ticker_ts ON paper_trades(ticker, ts DESC);
+
+CREATE TABLE IF NOT EXISTS paper_equity (
+    ts TIMESTAMP PRIMARY KEY,
+    cash REAL NOT NULL,
+    positions_value REAL NOT NULL,
+    equity REAL NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS paper_positions (
+    ticker TEXT PRIMARY KEY,
+    side TEXT NOT NULL DEFAULT 'long',
+    qty INTEGER NOT NULL,
+    entry_price REAL NOT NULL,
+    entry_ts TIMESTAMP NOT NULL,
+    sl REAL NOT NULL,
+    tp REAL NOT NULL,
+    reason TEXT NOT NULL,
+    signal_id INTEGER,
+    mark_price REAL NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
 """
 
 
@@ -56,6 +92,13 @@ class Storage:
         cols = {r["name"] for r in self._conn.execute("PRAGMA table_info(events)").fetchall()}
         if "summary_cn" not in cols:
             self._conn.execute("ALTER TABLE events ADD COLUMN summary_cn TEXT")
+        pos_cols = {
+            r["name"] for r in self._conn.execute("PRAGMA table_info(paper_positions)").fetchall()
+        }
+        if pos_cols and "side" not in pos_cols:
+            self._conn.execute(
+                "ALTER TABLE paper_positions ADD COLUMN side TEXT NOT NULL DEFAULT 'long'"
+            )
         self._conn.commit()
 
     def exists(self, source: str, external_id: str) -> bool:
@@ -67,8 +110,13 @@ class Storage:
 
     def insert(self, event: Event) -> bool:
         """Returns True if inserted, False if duplicate."""
+        inserted, _ = self.insert_with_id(event)
+        return inserted
+
+    def insert_with_id(self, event: Event) -> tuple[bool, int | None]:
+        """Returns (inserted, id). On duplicates, returns (False, existing_id)."""
         try:
-            self._conn.execute(
+            cur = self._conn.execute(
                 """INSERT INTO events
                    (source, external_id, ticker, event_type, title, summary, url,
                     published_at, importance, summary_cn, raw_json)
@@ -88,9 +136,16 @@ class Storage:
                 ),
             )
             self._conn.commit()
-            return True
+            return True, cur.lastrowid
         except sqlite3.IntegrityError:
-            return False
+            return False, self.get_event_id(event.source, event.external_id)
+
+    def get_event_id(self, source: str, external_id: str) -> int | None:
+        row = self._conn.execute(
+            "SELECT id FROM events WHERE source=? AND external_id=? LIMIT 1",
+            (source, external_id),
+        ).fetchone()
+        return int(row["id"]) if row is not None else None
 
     def query(
         self,
@@ -166,6 +221,135 @@ class Storage:
             d["meta"] = json.loads(d.pop("meta_json") or "{}")
             out.append(d)
         return out
+
+    def upsert_paper_position(
+        self,
+        *,
+        ticker: str,
+        side: str = "long",
+        qty: int,
+        entry_price: float,
+        entry_ts: datetime,
+        sl: float,
+        tp: float,
+        reason: str,
+        signal_id: int | None,
+        mark_price: float,
+        updated_at: datetime,
+    ) -> None:
+        self._conn.execute(
+            """INSERT INTO paper_positions
+               (ticker, side, qty, entry_price, entry_ts, sl, tp, reason, signal_id, mark_price, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               ON CONFLICT(ticker) DO UPDATE SET
+                 side=excluded.side,
+                 qty=excluded.qty,
+                 entry_price=excluded.entry_price,
+                 entry_ts=excluded.entry_ts,
+                 sl=excluded.sl,
+                 tp=excluded.tp,
+                 reason=excluded.reason,
+                 signal_id=excluded.signal_id,
+                 mark_price=excluded.mark_price,
+                 updated_at=excluded.updated_at
+            """,
+            (
+                ticker,
+                side,
+                qty,
+                entry_price,
+                entry_ts.isoformat(),
+                sl,
+                tp,
+                reason,
+                signal_id,
+                mark_price,
+                updated_at.isoformat(),
+            ),
+        )
+        self._conn.commit()
+
+    def delete_paper_position(self, ticker: str) -> None:
+        self._conn.execute("DELETE FROM paper_positions WHERE ticker=?", (ticker,))
+        self._conn.commit()
+
+    def list_paper_positions(self) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM paper_positions ORDER BY updated_at DESC, ticker ASC"
+        ).fetchall()
+        out = []
+        for row in rows:
+            d = dict(row)
+            out.append(d)
+        return out
+
+    def insert_paper_trade(
+        self,
+        *,
+        ts: datetime,
+        ticker: str,
+        side: str,
+        qty: int,
+        price: float,
+        reason: str,
+        pnl: float | None = None,
+        signal_id: int | None = None,
+        rr: float | None = None,
+    ) -> int:
+        cur = self._conn.execute(
+            """INSERT INTO paper_trades
+               (ts, ticker, side, qty, price, reason, pnl, signal_id, rr)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                ts.isoformat(),
+                ticker,
+                side,
+                qty,
+                price,
+                reason,
+                pnl,
+                signal_id,
+                rr,
+            ),
+        )
+        self._conn.commit()
+        return cur.lastrowid
+
+    def list_paper_trades(
+        self, *, ticker: str | None = None, limit: int = 200
+    ) -> list[dict]:
+        sql = "SELECT * FROM paper_trades WHERE 1=1"
+        params: list = []
+        if ticker:
+            sql += " AND ticker = ?"
+            params.append(ticker)
+        sql += " ORDER BY ts DESC, id DESC LIMIT ?"
+        params.append(limit)
+        rows = self._conn.execute(sql, params).fetchall()
+        return [dict(row) for row in rows]
+
+    def record_paper_equity(
+        self, *, ts: datetime, cash: float, positions_value: float, equity: float
+    ) -> None:
+        self._conn.execute(
+            """INSERT OR REPLACE INTO paper_equity (ts, cash, positions_value, equity)
+               VALUES (?, ?, ?, ?)""",
+            (ts.isoformat(), cash, positions_value, equity),
+        )
+        self._conn.commit()
+
+    def list_paper_equity(self, limit: int = 200) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM paper_equity ORDER BY ts DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [dict(row) for row in rows]
+
+    def last_paper_equity(self) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM paper_equity ORDER BY ts DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row is not None else None
 
     def _row_to_event(self, row: sqlite3.Row) -> Event:
         keys = row.keys()

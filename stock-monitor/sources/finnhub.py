@@ -14,8 +14,10 @@ class FinnhubSource(Source):
     BASE_URL = "https://finnhub.io/api/v1"
     EARNINGS_LOOKAHEAD_DAYS = 90
 
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, *, enable_news: bool = True, enable_earnings: bool = True):
         self._api_key = api_key
+        self._enable_news = enable_news
+        self._enable_earnings = enable_earnings
 
     async def _get(self, path: str, params: dict) -> Any:
         params = {**params, "token": self._api_key}
@@ -34,29 +36,31 @@ class FinnhubSource(Source):
         earnings_until = (today + timedelta(days=self.EARNINGS_LOOKAHEAD_DAYS)).isoformat()
         events: list[Event] = []
         for ticker in tickers:
-            try:
-                data = await self._get(
-                    "/company-news",
-                    {"symbol": ticker, "from": news_since, "to": news_until},
-                )
-                for item in data or []:
-                    ev = self._parse_news(item, ticker)
-                    if ev:
-                        events.append(ev)
-            except Exception as e:
-                log.warning("finnhub news failed for %s: %s", ticker, e)
+            if self._enable_news:
+                try:
+                    data = await self._get(
+                        "/company-news",
+                        {"symbol": ticker, "from": news_since, "to": news_until},
+                    )
+                    for item in data or []:
+                        ev = self._parse_news(item, ticker)
+                        if ev:
+                            events.append(ev)
+                except Exception as e:
+                    log.warning("finnhub news failed for %s: %s", ticker, e)
 
-            try:
-                data = await self._get(
-                    "/calendar/earnings",
-                    {"symbol": ticker, "from": today.isoformat(), "to": earnings_until},
-                )
-                for item in (data or {}).get("earningsCalendar") or []:
-                    ev = self._parse_earnings(item, ticker)
-                    if ev:
-                        events.append(ev)
-            except Exception as e:
-                log.warning("finnhub earnings failed for %s: %s", ticker, e)
+            if self._enable_earnings:
+                try:
+                    data = await self._get(
+                        "/calendar/earnings",
+                        {"symbol": ticker, "from": today.isoformat(), "to": earnings_until},
+                    )
+                    for item in (data or {}).get("earningsCalendar") or []:
+                        ev = self._parse_earnings(item, ticker)
+                        if ev:
+                            events.append(ev)
+                except Exception as e:
+                    log.warning("finnhub earnings failed for %s: %s", ticker, e)
         return events
 
     def _parse_news(self, item: dict, ticker: str) -> Event | None:

@@ -68,3 +68,24 @@ async def test_runner_tolerates_ibkr_disabled(monkeypatch):
     r = build_runner_if_enabled(storage=None, notifier=None, push_hub=None,
                                 tickers=["NVDA"])
     assert r is None
+
+
+async def test_start_times_out_when_ibkr_unavailable():
+    s = _storage()
+    async def hang_forever():
+        await asyncio.sleep(60)
+
+    fake_client = MagicMock()
+    fake_client.connect_with_retry = AsyncMock(side_effect=hang_forever)
+    fake_client.set_tickers = MagicMock()
+    fake_client.on_tick = MagicMock()
+    fake_client.on_bar = MagicMock()
+    runner = StreamingRunner(
+        client=fake_client, storage=s, notifier=Notifier(), push_hub=None,
+        tickers=["NVDA"],
+        tiers=[("high", 0.03)],
+        cooldown_sec=300,
+        startup_timeout_sec=0.01,
+    )
+    await runner.start()
+    fake_client.set_tickers.assert_not_called()

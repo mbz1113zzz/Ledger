@@ -80,7 +80,12 @@ async def test_send_digest_broadcasts(tmp_path: Path):
         async def push_text(self, c, t, b): sent.append((t, b))
 
     hub = PushHub([Fake()])
-    count = await send_digest(s, hub, lookback_hours=48)
+    count = await send_digest(
+        s,
+        hub,
+        lookback_hours=48,
+        now=datetime(2026, 4, 19, 13, 0, tzinfo=timezone.utc),
+    )
     assert count == 1
     assert len(sent) == 1
     assert "NVDA" in sent[0][1]

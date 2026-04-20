@@ -13,15 +13,27 @@ class SourceHealth:
         self._name = source_name
         self._consecutive_4xx = 0
         self._disabled = False
+        self._last_status: int | None = None
+        self._reason: str | None = None
 
     @property
     def disabled(self) -> bool:
         return self._disabled
 
+    @property
+    def reason(self) -> str | None:
+        return self._reason
+
+    @property
+    def last_status(self) -> int | None:
+        return self._last_status
+
     def record_4xx(self, status: int) -> None:
         if self._disabled:
             return
         self._consecutive_4xx += 1
+        self._last_status = status
+        self._reason = "permission_denied" if status in (401, 403) else "client_error"
         if self._consecutive_4xx >= self.THRESHOLD:
             self._disabled = True
             log.warning(
@@ -35,3 +47,5 @@ class SourceHealth:
             log.info("source %s recovered, re-enabling", self._name)
             self._disabled = False
         self._consecutive_4xx = 0
+        self._last_status = None
+        self._reason = None

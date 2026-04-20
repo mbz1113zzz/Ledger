@@ -84,13 +84,25 @@ class StructureEvent:
 class SmcSignal:
     ts: datetime
     ticker: str
-    reason: Literal["smc_choch_ob", "smc_bos_ob"]
     entry: float
     sl: float
     tp: float
+    side: Literal["long", "short"] = "long"
+    reason: Literal[
+        "smc_choch_ob",
+        "smc_bos_ob",
+        "smc_choch_ob_short",
+        "smc_bos_ob_short",
+    ] = "smc_bos_ob"
     ob_id: int | None = None
 
+    def risk_per_share(self) -> float:
+        return (self.entry - self.sl) if self.side == "long" else (self.sl - self.entry)
+
+    def reward_per_share(self) -> float:
+        return (self.tp - self.entry) if self.side == "long" else (self.entry - self.tp)
+
     def rr(self) -> float:
-        risk = self.entry - self.sl
-        reward = self.tp - self.entry
+        risk = self.risk_per_share()
+        reward = self.reward_per_share()
         return reward / risk if risk > 0 else 0.0

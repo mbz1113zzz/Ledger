@@ -12,6 +12,7 @@ const impChecks = document.querySelectorAll('aside input[data-imp]');
 let selectedTicker = null;
 let allEvents = [];
 let watchlistCache = [];
+let paperCache = { positions: [], trades: [], equity: [] };
 const MAX_EVENTS = 1000;
 
 /* ---------- theme ---------- */
@@ -116,6 +117,46 @@ function render() {
   summary.textContent = `${tag}${visible.length} events · ${highCount} high`;
 
   renderWatchlist(watchlistCache);
+  renderPaperPanel();
+}
+
+function money(n) {
+  const sign = n > 0 ? '+' : '';
+  return `${sign}$${Number(n || 0).toFixed(2)}`;
+}
+
+function renderPaperPanel() {
+  const statsEl = document.getElementById('paper-stats');
+  const positionsEl = document.getElementById('paper-positions');
+  if (!statsEl || !positionsEl) return;
+  const equity = Number(paperCache.equity || 0);
+  const cash = Number(paperCache.cash || 0);
+  const positions = paperCache.positions || [];
+  const unrealized = positions.reduce((sum, p) => sum + Number(p.unrealized_pnl || 0), 0);
+  statsEl.innerHTML = `
+    <div class="paper-metric"><span>Equity</span><strong>${money(equity).replace('+', '')}</strong></div>
+    <div class="paper-metric"><span>Cash</span><strong>${money(cash).replace('+', '')}</strong></div>
+    <div class="paper-metric"><span>U-PnL</span><strong class="${unrealized >= 0 ? 'pos' : 'neg'}">${money(unrealized)}</strong></div>
+  `;
+  if (!positions.length) {
+    positionsEl.innerHTML = '<div class="paper-empty">当前无持仓</div>';
+    return;
+  }
+  positionsEl.innerHTML = positions.map(p => `
+    <div class="paper-pos">
+      <div class="paper-pos-head">
+        <span class="ticker">${escapeHtml(p.ticker)}</span>
+        <span class="paper-side ${p.side === 'short' ? 'short' : 'long'}">${p.side === 'short' ? 'SHORT' : 'LONG'}</span>
+        <span class="${Number(p.unrealized_pnl) >= 0 ? 'pos' : 'neg'}">${money(p.unrealized_pnl)}</span>
+      </div>
+      <div class="paper-pos-meta">
+        ${p.side === 'short' ? '-' : '+'}${p.qty} 股 · 入场 ${Number(p.entry_price).toFixed(2)} · 现价 ${Number(p.mark_price).toFixed(2)}
+      </div>
+      <div class="paper-pos-meta">
+        SL ${Number(p.sl).toFixed(2)} · TP ${Number(p.tp).toFixed(2)} · ${escapeHtml(p.reason)}
+      </div>
+    </div>
+  `).join('');
 }
 
 /* ---------- watchlist ---------- */
@@ -219,6 +260,15 @@ async function loadWatchlist() {
   renderWatchlist(data.tickers);
 }
 
+async function loadPaper() {
+  try {
+    const r = await fetch('/api/paper/positions');
+    const data = await r.json();
+    paperCache = data;
+    renderPaperPanel();
+  } catch (e) { /* silent */ }
+}
+
 async function loadHistory() {
   const r = await fetch('/api/events?limit=500');
   const data = await r.json();
@@ -237,6 +287,110 @@ function appendStructureBadge(s) {
   feed.prepend(div);
 }
 
+async function openPaperTrades() {
+  openModal('成交记录', '<p class="empty-note">加载中…</p>');
+  try {
+    const r = await fetch('/api/paper/trades?limit=100');
+    const d = await r.json();
+    if (!d.trades.length) {
+      openModal('成交记录', '<p class="empty-note">暂无成交记录</p>');
+      return;
+    }
+    const rows = d.trades.map(t => `
+      <tr>
+        <td class="win">${new Date(t.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+        <td>${escapeHtml(t.ticker)}</td>
+        <td>${escapeHtml(t.side)}</td>
+        <td>${t.qty}</td>
+        <td>${Number(t.price).toFixed(2)}</td>
+        <td>${escapeHtml(t.reason)}</td>
+        <td class="${Number(t.pnl || 0) >= 0 ? 'pos' : 'neg'}">${t.pnl == null ? '' : money(t.pnl)}</td>
+      </tr>
+    `).join('');
+    openModal('成交记录', `
+      <table>
+        <thead><tr><th style="text-align:left">时间</th><th>票</th><th>方向</th><th>qty</th><th>价格</th><th>原因</th><th>PnL</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `);
+  } catch (e) {
+    openModal('成交记录', `<p class="empty-note">加载失败: ${e.message}</p>`);
+  }
+}
+
+async function openPaperEquity() {
+  openModal('权益快照', '<p class="empty-note">加载中…</p>');
+  try {
+    const r = await fetch('/api/paper/equity?limit=50');
+    const d = await r.json();
+    if (!d.equity.length) {
+      openModal('权益快照', '<p class="empty-note">暂无权益快照</p>');
+      return;
+    }
+    const rows = d.equity.map(t => `
+      <tr>
+        <td class="win">${new Date(t.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
+        <td>${Number(t.cash).toFixed(2)}</td>
+        <td>${Number(t.positions_value).toFixed(2)}</td>
+        <td>${Number(t.equity).toFixed(2)}</td>
+      </tr>
+    `).join('');
+    openModal('权益快照', `
+      <table>
+        <thead><tr><th style="text-align:left">时间</th><th>Cash</th><th>持仓市值</th><th>Equity</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `);
+  } catch (e) {
+    openModal('权益快照', `<p class="empty-note">加载失败: ${e.message}</p>`);
+  }
+}
+
+async function openPaperReview() {
+  openModal('每日复盘', '<p class="empty-note">加载中…</p>');
+  try {
+    const r = await fetch('/api/paper/review');
+    const d = await r.json();
+    openModal('每日复盘', `
+      <p style="color:var(--text-2);margin-bottom:12px">${escapeHtml(d.title)}</p>
+      <pre>${escapeHtml(d.body)}</pre>
+    `);
+  } catch (e) {
+    openModal('每日复盘', `<p class="empty-note">加载失败: ${e.message}</p>`);
+  }
+}
+
+async function openPaperStats() {
+  openModal('胜率面板', '<p class="empty-note">加载中…</p>');
+  try {
+    const r = await fetch('/api/paper/stats');
+    const d = await r.json();
+    if (!d.rows.length) {
+      openModal('胜率面板', '<p class="empty-note">暂无历史样本</p>');
+      return;
+    }
+    const rows = d.rows.map(row => `
+      <tr>
+        <td class="win">${escapeHtml(row.ticker)}</td>
+        <td>${escapeHtml(row.setup)}</td>
+        <td>${row.entries}</td>
+        <td>${row.closed}</td>
+        <td>${row.win_rate_pct.toFixed(0)}%</td>
+        <td class="${Number(row.avg_rr) >= 0 ? 'pos' : 'neg'}">${Number(row.avg_rr).toFixed(2)}</td>
+        <td class="${Number(row.avg_pnl) >= 0 ? 'pos' : 'neg'}">${money(row.avg_pnl)}</td>
+      </tr>
+    `).join('');
+    openModal('胜率面板', `
+      <table>
+        <thead><tr><th style="text-align:left">Ticker</th><th>Setup</th><th>入场</th><th>已平</th><th>胜率</th><th>平均 RR</th><th>平均 PnL</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table>
+    `);
+  } catch (e) {
+    openModal('胜率面板', `<p class="empty-note">加载失败: ${e.message}</p>`);
+  }
+}
+
 /* ---------- SSE ---------- */
 function connectStream() {
   const es = new EventSource('/stream');
@@ -251,6 +405,7 @@ function connectStream() {
     allEvents.unshift(ev);
     if (allEvents.length > MAX_EVENTS) allEvents.length = MAX_EVENTS;
     render();
+    if (ev.event_type === 'smc_entry') loadPaper();
     if (ev.importance === 'high' && notifToggle.checked
         && Notification.permission === 'granted') {
       new Notification(`${ev.ticker}: ${ev.title}`, { body: ev.summary || '' });
@@ -292,6 +447,10 @@ document.getElementById('btn-digest').addEventListener('click', async () => {
     openModal('早报预览', `<p class="empty-note">加载失败: ${e.message}</p>`);
   }
 });
+document.getElementById('btn-paper-trades').addEventListener('click', openPaperTrades);
+document.getElementById('btn-paper-equity').addEventListener('click', openPaperEquity);
+document.getElementById('btn-paper-review').addEventListener('click', openPaperReview);
+document.getElementById('btn-paper-stats').addEventListener('click', openPaperStats);
 
 /* ---------- backtest ---------- */
 const btBtn = document.getElementById('btn-backtest');
@@ -372,10 +531,22 @@ async function loadHealth() {
 
 function renderSources(d) {
   const ul = document.getElementById('sources-list');
+  const dotClass = (status) => {
+    if (status === 'ok') return 'ok';
+    if (status === 'permission_denied') return 'warn';
+    return 'disabled';
+  };
+  const label = (status, detail) => {
+    if (status === 'permission_denied') return detail ? `403 / tier` : 'tier';
+    if (status === 'client_error') return detail ? `${detail}` : '4xx';
+    if (status === 'disabled') return 'off';
+    return '';
+  };
   ul.innerHTML = (d.sources || []).map(s => `
     <li>
-      <span class="dot ${s.status === 'ok' ? 'ok' : 'disabled'}"></span>
+      <span class="dot ${dotClass(s.status)}"></span>
       <span>${s.name}</span>
+      ${label(s.status, s.detail) ? `<span class="src-status">${label(s.status, s.detail)}</span>` : ''}
       <span class="group">${s.group}</span>
     </li>
   `).join('');
@@ -390,13 +561,16 @@ function renderSources(d) {
     const mins = Math.floor((Date.now() - new Date(d.last_news_run).getTime()) / 60000);
     lastLine = `上次 news: ${mins}m 前 (+${d.last_news_inserted})`;
   }
-  meta.innerHTML = `${channels}<br>${enr}<br>${lastLine}`;
+  const startup = d.startup_sync_running ? '<span class="ch">BOOT✓</span>' : '<span class="ch-off">BOOT·</span>';
+  meta.innerHTML = `${channels}<br>${enr} ${startup}<br>${lastLine}`;
 }
 
 /* ---------- boot ---------- */
 (async () => {
   await loadHistory();
+  await loadPaper();
   await loadHealth();
   setInterval(loadHealth, 30000);
+  setInterval(loadPaper, 30000);
   connectStream();
 })();

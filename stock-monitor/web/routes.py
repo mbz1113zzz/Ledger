@@ -12,6 +12,8 @@ from backtest import YahooPriceFetcher, run_backtest
 from digest import build_digest, send_digest
 from datetime import datetime, timedelta, timezone
 from notifier import Notifier
+from paper.broker import PaperBroker
+from paper.review import build_daily_review, build_win_rate_stats
 from pipeline import Pipeline
 from pushers import PushHub
 from storage import Storage
@@ -32,6 +34,7 @@ def build_router(
     pipeline: Pipeline,
     price_pipeline: Pipeline,
     push_hub: PushHub,
+    paper_broker: PaperBroker,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -59,25 +62,31 @@ def build_router(
         return {"tickers": watchlist.tickers()}
 
     @router.post("/api/watchlist")
-    async def add_ticker(payload: TickerPayload):
+    async def add_ticker(payload: TickerPayload, request: Request):
         try:
             t = watchlist.add(payload.ticker)
         except WatchlistError as e:
             raise HTTPException(status_code=400, detail=str(e))
         pipeline.set_tickers(watchlist.tickers())
         price_pipeline.set_tickers(watchlist.tickers())
+        runner = getattr(request.app.state, "streaming_runner", None)
+        if runner is not None:
+            runner.set_tickers(watchlist.tickers())
         asyncio.create_task(pipeline.run_once())
         asyncio.create_task(price_pipeline.run_once())
         return {"tickers": watchlist.tickers(), "added": t}
 
     @router.delete("/api/watchlist/{ticker}")
-    async def remove_ticker(ticker: str):
+    async def remove_ticker(ticker: str, request: Request):
         try:
             t = watchlist.remove(ticker)
         except WatchlistError as e:
             raise HTTPException(status_code=400, detail=str(e))
         pipeline.set_tickers(watchlist.tickers())
         price_pipeline.set_tickers(watchlist.tickers())
+        runner = getattr(request.app.state, "streaming_runner", None)
+        if runner is not None:
+            runner.set_tickers(watchlist.tickers())
         return {"tickers": watchlist.tickers(), "removed": t}
 
     @router.get("/healthz")
@@ -85,18 +94,33 @@ def build_router(
         return {"status": "ok"}
 
     @router.get("/api/health")
-    async def health_detail():
+    async def health_detail(request: Request):
         def src_status(s):
             h = getattr(s, "_health", None)
             if h is not None:
-                return "disabled" if h.disabled else "ok"
+                if h.disabled:
+                    return h.reason or "disabled"
+                if h.reason and h.last_status is not None:
+                    return h.reason
             return "ok"
 
         sources = []
         for s in pipeline.sources:
-            sources.append({"name": s.name, "group": "news", "status": src_status(s)})
+            h = getattr(s, "_health", None)
+            sources.append({
+                "name": s.name,
+                "group": "news",
+                "status": src_status(s),
+                "detail": getattr(h, "last_status", None),
+            })
         for s in price_pipeline.sources:
-            sources.append({"name": s.name, "group": "price", "status": src_status(s)})
+            h = getattr(s, "_health", None)
+            sources.append({
+                "name": s.name,
+                "group": "price",
+                "status": src_status(s),
+                "detail": getattr(h, "last_status", None),
+            })
 
         enricher = pipeline.enricher
         return {
@@ -108,6 +132,10 @@ def build_router(
             "last_news_inserted": pipeline.last_run_inserted,
             "last_price_run": price_pipeline.last_run_at.isoformat() if price_pipeline.last_run_at else None,
             "last_price_inserted": price_pipeline.last_run_inserted,
+            "startup_sync_running": (
+                (task := getattr(request.app.state, "startup_sync_task", None)) is not None
+                and not task.done()
+            ),
         }
 
     @router.post("/api/refresh")
@@ -148,6 +176,37 @@ def build_router(
                             limit: int = 200):
         rows = storage.query_smc_structure(ticker=ticker, kind=kind, limit=limit)
         return {"events": rows}
+
+    @router.get("/api/paper/positions")
+    async def paper_positions():
+        return {
+            "positions": paper_broker.ledger.positions_payload(),
+            "cash": round(paper_broker.ledger.cash, 4),
+            "equity": round(paper_broker.ledger.equity_now(), 4),
+        }
+
+    @router.get("/api/paper/trades")
+    async def paper_trades(ticker: str | None = None, limit: int = 200):
+        return {"trades": storage.list_paper_trades(ticker=ticker, limit=limit)}
+
+    @router.get("/api/paper/equity")
+    async def paper_equity(limit: int = 200):
+        return {"equity": storage.list_paper_equity(limit=limit)}
+
+    @router.get("/api/paper/review")
+    async def paper_review(date: str | None = None):
+        payload = build_daily_review(storage, day_str=date)
+        return {
+            "title": payload.title,
+            "body": payload.body,
+            "date": payload.date,
+            "trade_count": payload.trade_count,
+            "pnl": payload.pnl,
+        }
+
+    @router.get("/api/paper/stats")
+    async def paper_stats():
+        return {"rows": build_win_rate_stats(storage)}
 
     @router.get("/stream")
     async def stream(request: Request):

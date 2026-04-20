@@ -9,7 +9,7 @@ from pushers import PushHub
 from sources.base import Event
 from storage import Storage
 from streaming.anomaly import AnomalySignal
-from smc.types import StructureEvent
+from smc.types import SmcSignal, StructureEvent
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +65,26 @@ class SignalRouter:
             "type": "structure", "ticker": ev.ticker, "tf": tf,
             "kind": ev.kind, "price": ev.price, "ts": ev.ts.isoformat(),
         })
+
+    async def on_smc_signal(self, sig: SmcSignal) -> int | None:
+        ext = f"ibkr:smc:{sig.ticker}:{sig.reason}:{_minute_bucket(sig.ts)}"
+        ev = Event(
+            source="ibkr",
+            external_id=ext,
+            ticker=sig.ticker,
+            event_type="smc_entry",
+            title=f"{sig.ticker} SMC {sig.side} {sig.reason}",
+            summary=f"side={sig.side} entry={sig.entry:.2f} sl={sig.sl:.2f} tp={sig.tp:.2f}",
+            url=None,
+            published_at=sig.ts,
+            raw=_serializable_asdict(sig),
+            importance="high",
+            summary_cn=None,
+        )
+        inserted, event_id = self._s.insert_with_id(ev)
+        if inserted:
+            await self._n.publish(self._serialize(ev))
+        return event_id
 
     @staticmethod
     def _serialize(ev: Event) -> dict:
