@@ -208,6 +208,56 @@ def build_router(
     async def paper_stats():
         return {"rows": build_win_rate_stats(storage)}
 
+    @router.get("/api/chart")
+    async def chart(
+        ticker: str,
+        interval: str = "5m",
+        range_days: int = 5,
+        limit: int = 240,
+    ):
+        allowed = {"5m", "15m", "1h", "1d"}
+        if interval not in allowed:
+            raise HTTPException(status_code=400, detail=f"unsupported interval: {interval}")
+        if range_days < 1 or range_days > 365:
+            raise HTTPException(status_code=400, detail="range_days must be between 1 and 365")
+
+        now = datetime.now(timezone.utc)
+        start = now - timedelta(days=range_days)
+        candles = await _price_fetcher.chart_candles(
+            ticker=ticker,
+            start=start,
+            end=now,
+            interval=interval,
+        )
+        if limit > 0:
+            candles = candles[-limit:]
+
+        if candles:
+            since = datetime.fromisoformat(candles[0]["ts"])
+        else:
+            since = start
+
+        structures = [
+            row for row in storage.query_smc_structure(ticker=ticker, limit=2000)
+            if datetime.fromisoformat(row["ts"]) >= since
+        ]
+        structures.sort(key=lambda row: row["ts"])
+
+        trades = [
+            row for row in storage.list_paper_trades(ticker=ticker, limit=1000)
+            if datetime.fromisoformat(row["ts"]) >= since
+        ]
+        trades.sort(key=lambda row: row["ts"])
+
+        return {
+            "ticker": ticker.upper(),
+            "interval": interval,
+            "range_days": range_days,
+            "candles": candles,
+            "structures": structures,
+            "trades": trades,
+        }
+
     @router.get("/stream")
     async def stream(request: Request):
         queue = await notifier.subscribe()

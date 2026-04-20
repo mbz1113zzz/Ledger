@@ -98,6 +98,41 @@ async def test_yahoo_fetcher_caches_response():
 
 
 @pytest.mark.asyncio
+async def test_yahoo_chart_candles_parses_ohlc():
+    f = YahooPriceFetcher()
+    fake_resp = {"chart": {"result": [{
+        "timestamp": [1712707200, 1712707500],
+        "indicators": {"quote": [{
+            "open": [100.0, 101.0],
+            "high": [102.0, 103.0],
+            "low": [99.0, 100.5],
+            "close": [101.0, 102.5],
+            "volume": [1000, 1200],
+        }]},
+    }]}}
+
+    class FakeResp:
+        def raise_for_status(self): pass
+        def json(self): return fake_resp
+
+    async def fake_get(*a, **kw):
+        return FakeResp()
+
+    with patch("httpx.AsyncClient") as mock_client:
+        instance = mock_client.return_value.__aenter__.return_value
+        instance.get = fake_get
+        candles = await f.chart_candles(
+            "NVDA",
+            datetime(2026, 4, 1, tzinfo=timezone.utc),
+            datetime(2026, 4, 2, tzinfo=timezone.utc),
+            interval="5m",
+        )
+    assert len(candles) == 2
+    assert candles[0]["o"] == 100.0
+    assert candles[1]["c"] == 102.5
+
+
+@pytest.mark.asyncio
 async def test_run_backtest_empty_when_no_events(tmp_path: Path):
     s = Storage(str(tmp_path / "t.db"))
     s.init_schema()

@@ -603,7 +603,11 @@ aside h2 {
   background: var(--bg-soft); border: 1px solid var(--border);
   border-radius: 8px; padding: 14px; margin: 0; color: var(--text); }
 .modal-body .bt-controls { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+.modal-body .chart-controls { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
 .modal-body .bt-controls select { font: 13px var(--f-sans); padding: 6px 10px;
+  background: var(--bg-soft); color: var(--text);
+  border: 1px solid var(--border); border-radius: 6px; }
+.modal-body .chart-controls select { font: 13px var(--f-sans); padding: 6px 10px;
   background: var(--bg-soft); color: var(--text);
   border: 1px solid var(--border); border-radius: 6px; }
 .modal-body .bt-run { font: 500 13px var(--f-sans); padding: 6px 14px;
@@ -620,6 +624,50 @@ aside h2 {
 .modal-body td.neg { color: var(--accent); }
 .modal-body .empty-note { color: var(--text-2); font-style: italic;
   padding: 20px 0; text-align: center; }
+.chart-summary {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+  color: var(--text-2);
+  font: 11px var(--f-mono);
+}
+.chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--panel) 96%, transparent), color-mix(in srgb, var(--bg-soft) 96%, transparent));
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.chart-grid {
+  stroke: color-mix(in srgb, var(--border) 75%, transparent);
+  stroke-width: 1;
+}
+.chart-axis-label {
+  fill: var(--muted);
+  font: 10px var(--f-mono);
+}
+.chart-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  color: var(--text-2);
+  font: 11px var(--f-mono);
+}
+.chart-legend .lg {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border-radius: 2px;
+  vertical-align: -1px;
+}
+.chart-legend .candle-up { background: #67b87b; }
+.chart-legend .candle-down { background: #ef5350; }
+.chart-legend .struct-up { background: #42a5f5; border-radius: 50%; }
+.chart-legend .trade-buy { background: #ffb74d; clip-path: polygon(50% 0, 0 100%, 100% 100%); }
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 
 /* ---------- sources panel ---------- */

@@ -32,6 +32,7 @@ class YahooPriceFetcher:
 
     def __init__(self):
         self._cache: dict[tuple[str, date, date], tuple[float, dict[date, float]]] = {}
+        self._chart_cache: dict[tuple[str, str, str, str], tuple[float, list[dict]]] = {}
 
     async def daily_closes(
         self, ticker: str, start: date, end: date
@@ -65,6 +66,67 @@ class YahooPriceFetcher:
             d = datetime.fromtimestamp(t, tz=timezone.utc).date()
             result[d] = float(c)
         self._cache[key] = (now, result)
+        return result
+
+    async def chart_candles(
+        self,
+        ticker: str,
+        start: datetime,
+        end: datetime,
+        *,
+        interval: str = "1d",
+    ) -> list[dict]:
+        import time as _time
+
+        key = (ticker.upper(), start.isoformat(), end.isoformat(), interval)
+        now = _time.time()
+        hit = self._chart_cache.get(key)
+        if hit and now - hit[0] < self.CACHE_TTL_SECS:
+            return hit[1]
+
+        p1 = int(start.timestamp())
+        p2 = int(end.timestamp())
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            r = await client.get(
+                f"{self.BASE}/{ticker}",
+                params={
+                    "period1": p1,
+                    "period2": p2,
+                    "interval": interval,
+                    "includePrePost": "false",
+                },
+                headers={"User-Agent": "Mozilla/5.0"},
+            )
+            r.raise_for_status()
+            data = r.json()
+
+        result: list[dict] = []
+        try:
+            chart = data["chart"]["result"][0]
+            timestamps = chart["timestamp"]
+            quote = chart["indicators"]["quote"][0]
+            opens = quote["open"]
+            highs = quote["high"]
+            lows = quote["low"]
+            closes = quote["close"]
+            volumes = quote.get("volume") or [0] * len(timestamps)
+        except (KeyError, IndexError, TypeError):
+            return result
+
+        for ts, o, h, l, c, v in zip(timestamps, opens, highs, lows, closes, volumes):
+            if None in (o, h, l, c):
+                continue
+            candle_ts = datetime.fromtimestamp(ts, tz=timezone.utc)
+            result.append({
+                "ts": candle_ts.isoformat(),
+                "o": float(o),
+                "h": float(h),
+                "l": float(l),
+                "c": float(c),
+                "v": float(v or 0.0),
+            })
+
+        self._chart_cache[key] = (now, result)
         return result
 
 

@@ -391,6 +391,185 @@ async function openPaperStats() {
   }
 }
 
+function chartColorForStructure(kind) {
+  if (kind === 'bos_up' || kind === 'choch_up') return '#4caf50';
+  if (kind === 'bos_down' || kind === 'choch_down') return '#ef5350';
+  if (kind === 'ob_bull') return '#42a5f5';
+  if (kind === 'ob_bear') return '#ab47bc';
+  if (kind.startsWith('liq_sweep')) return '#ffa726';
+  return '#9e9e9e';
+}
+
+function renderSvgChart(data) {
+  const candles = data.candles || [];
+  if (!candles.length) {
+    return '<p class="empty-note">该区间没有可用价格数据</p>';
+  }
+  const width = 960;
+  const height = 520;
+  const left = 58;
+  const right = 18;
+  const top = 18;
+  const bottom = 42;
+  const plotW = width - left - right;
+  const plotH = height - top - bottom;
+  const allPrices = [];
+  candles.forEach(c => allPrices.push(c.h, c.l));
+  (data.structures || []).forEach(s => allPrices.push(Number(s.price)));
+  (data.trades || []).forEach(t => allPrices.push(Number(t.price)));
+  const minPrice = Math.min(...allPrices);
+  const maxPrice = Math.max(...allPrices);
+  const pad = Math.max((maxPrice - minPrice) * 0.08, 0.5);
+  const low = minPrice - pad;
+  const high = maxPrice + pad;
+  const priceToY = (p) => top + (high - p) / (high - low || 1) * plotH;
+  const step = plotW / Math.max(candles.length, 1);
+  const candleW = Math.max(2, Math.min(10, step * 0.68));
+  const tsToX = (iso) => {
+    const idx = candles.findIndex(c => c.ts === iso);
+    if (idx >= 0) return left + idx * step + step / 2;
+    const target = new Date(iso).getTime();
+    let bestIdx = 0;
+    let bestDiff = Infinity;
+    candles.forEach((c, i) => {
+      const diff = Math.abs(new Date(c.ts).getTime() - target);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        bestIdx = i;
+      }
+    });
+    return left + bestIdx * step + step / 2;
+  };
+
+  const gridLines = Array.from({ length: 5 }, (_, i) => {
+    const price = low + (high - low) * (i / 4);
+    const y = priceToY(price);
+    return `
+      <line x1="${left}" y1="${y}" x2="${width - right}" y2="${y}" class="chart-grid" />
+      <text x="${left - 8}" y="${y + 4}" class="chart-axis-label" text-anchor="end">${price.toFixed(2)}</text>
+    `;
+  }).join('');
+
+  const candleSvg = candles.map((c, i) => {
+    const x = left + i * step + step / 2;
+    const wickTop = priceToY(c.h);
+    const wickBottom = priceToY(c.l);
+    const bodyTop = priceToY(Math.max(c.o, c.c));
+    const bodyBottom = priceToY(Math.min(c.o, c.c));
+    const bullish = c.c >= c.o;
+    const color = bullish ? '#67b87b' : '#ef5350';
+    const bodyHeight = Math.max(1.5, bodyBottom - bodyTop);
+    return `
+      <line x1="${x}" y1="${wickTop}" x2="${x}" y2="${wickBottom}" stroke="${color}" stroke-width="1.25" />
+      <rect x="${x - candleW / 2}" y="${bodyTop}" width="${candleW}" height="${bodyHeight}" fill="${bullish ? color : 'transparent'}" stroke="${color}" stroke-width="1.25">
+        <title>${new Date(c.ts).toLocaleString('zh-CN')} O:${c.o.toFixed(2)} H:${c.h.toFixed(2)} L:${c.l.toFixed(2)} C:${c.c.toFixed(2)}</title>
+      </rect>
+    `;
+  }).join('');
+
+  const structureSvg = (data.structures || []).map((s) => {
+    const x = tsToX(s.ts);
+    const y = priceToY(Number(s.price));
+    const color = chartColorForStructure(s.kind);
+    return `
+      <circle cx="${x}" cy="${y}" r="4" fill="${color}" class="chart-structure">
+        <title>${s.kind} @ ${Number(s.price).toFixed(2)} · ${new Date(s.ts).toLocaleString('zh-CN')}</title>
+      </circle>
+    `;
+  }).join('');
+
+  const tradeSvg = (data.trades || []).map((t) => {
+    const x = tsToX(t.ts);
+    const y = priceToY(Number(t.price));
+    const isBuy = t.side === 'buy';
+    const color = isBuy ? '#42a5f5' : '#ffb74d';
+    const points = isBuy
+      ? `${x},${y - 8} ${x - 7},${y + 5} ${x + 7},${y + 5}`
+      : `${x},${y + 8} ${x - 7},${y - 5} ${x + 7},${y - 5}`;
+    return `
+      <polygon points="${points}" fill="${color}" class="chart-trade">
+        <title>${t.side} ${t.reason} @ ${Number(t.price).toFixed(2)} · ${new Date(t.ts).toLocaleString('zh-CN')}</title>
+      </polygon>
+    `;
+  }).join('');
+
+  const axisLabels = candles.filter((_, i) => i % Math.max(1, Math.floor(candles.length / 6)) === 0)
+    .map((c, i) => {
+      const x = left + (candles.findIndex(row => row.ts === c.ts)) * step + step / 2;
+      const txt = new Date(c.ts).toLocaleString('zh-CN', {
+        month: '2-digit', day: '2-digit', hour: data.interval === '1d' ? undefined : '2-digit',
+      });
+      return `<text x="${x}" y="${height - 12}" class="chart-axis-label" text-anchor="middle">${txt}</text>`;
+    }).join('');
+
+  return `
+    <div class="chart-summary">
+      <span><b>${escapeHtml(data.ticker)}</b> · ${escapeHtml(data.interval)} · ${candles.length} candles</span>
+      <span>Structure ${data.structures.length}</span>
+      <span>Trades ${data.trades.length}</span>
+    </div>
+    <svg viewBox="0 0 ${width} ${height}" class="chart-svg" role="img" aria-label="price chart">
+      ${gridLines}
+      ${candleSvg}
+      ${structureSvg}
+      ${tradeSvg}
+      ${axisLabels}
+    </svg>
+    <div class="chart-legend">
+      <span><i class="lg candle-up"></i> Bull candle</span>
+      <span><i class="lg candle-down"></i> Bear candle</span>
+      <span><i class="lg struct-up"></i> Structure</span>
+      <span><i class="lg trade-buy"></i> Trade</span>
+    </div>
+  `;
+}
+
+function openChartPanel(initialTicker, initialInterval = '5m', initialRange = 5) {
+  const ticker = initialTicker || (selectedTicker || watchlistCache[0] || 'NVDA');
+  const tickerOpts = watchlistCache
+    .map(t => `<option value="${t}"${t === ticker ? ' selected' : ''}>${t}</option>`)
+    .join('');
+  const intervalOpts = ['5m', '15m', '1h', '1d']
+    .map(v => `<option value="${v}"${v === initialInterval ? ' selected' : ''}>${v}</option>`)
+    .join('');
+  const rangeOpts = [1, 5, 30, 90]
+    .map(v => `<option value="${v}"${v === initialRange ? ' selected' : ''}>${v}d</option>`)
+    .join('');
+  openModal('图表可视化', `
+    <div class="chart-controls">
+      <select id="chart-ticker">${tickerOpts}</select>
+      <select id="chart-interval">${intervalOpts}</select>
+      <select id="chart-range">${rangeOpts}</select>
+      <button class="bt-run" id="chart-run">更新</button>
+    </div>
+    <div id="chart-view"><p class="empty-note">加载中…</p></div>
+  `);
+  const tickerEl = document.getElementById('chart-ticker');
+  const intervalEl = document.getElementById('chart-interval');
+  const rangeEl = document.getElementById('chart-range');
+  const run = async () => {
+    const view = document.getElementById('chart-view');
+    view.innerHTML = '<p class="empty-note">加载中…</p>';
+    try {
+      const params = new URLSearchParams({
+        ticker: tickerEl.value,
+        interval: intervalEl.value,
+        range_days: rangeEl.value,
+      });
+      const r = await fetch(`/api/chart?${params.toString()}`);
+      const d = await r.json();
+      view.innerHTML = renderSvgChart(d);
+    } catch (e) {
+      view.innerHTML = `<p class="empty-note">加载失败: ${e.message}</p>`;
+    }
+  };
+  document.getElementById('chart-run').addEventListener('click', run);
+  tickerEl.addEventListener('change', run);
+  intervalEl.addEventListener('change', run);
+  rangeEl.addEventListener('change', run);
+  run();
+}
+
 /* ---------- SSE ---------- */
 function connectStream() {
   const es = new EventSource('/stream');
@@ -447,6 +626,7 @@ document.getElementById('btn-digest').addEventListener('click', async () => {
     openModal('早报预览', `<p class="empty-note">加载失败: ${e.message}</p>`);
   }
 });
+document.getElementById('btn-chart').addEventListener('click', () => openChartPanel(selectedTicker || watchlistCache[0] || 'NVDA'));
 document.getElementById('btn-paper-trades').addEventListener('click', openPaperTrades);
 document.getElementById('btn-paper-equity').addEventListener('click', openPaperEquity);
 document.getElementById('btn-paper-review').addEventListener('click', openPaperReview);

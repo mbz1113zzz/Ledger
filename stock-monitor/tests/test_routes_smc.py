@@ -116,3 +116,32 @@ def test_paper_review_route_returns_markdown_payload(client):
     body = r.json()
     assert body["date"] == "2026-04-19"
     assert "Daily Review" in body["body"]
+
+
+def test_chart_route_returns_candles_structures_and_trades(client, monkeypatch):
+    import app as am
+    import backtest as backtest_module
+
+    async def fake_chart_candles(self, ticker, start, end, interval="5m"):
+        return [
+            {"ts": "2026-04-19T14:30:00+00:00", "o": 100.0, "h": 101.0, "l": 99.0, "c": 100.5, "v": 1000.0},
+            {"ts": "2026-04-19T14:35:00+00:00", "o": 100.5, "h": 102.0, "l": 100.0, "c": 101.5, "v": 900.0},
+        ]
+
+    monkeypatch.setattr(backtest_module.YahooPriceFetcher, "chart_candles", fake_chart_candles)
+    s = am.app.state.storage
+    ts = datetime(2026, 4, 19, 14, 35, tzinfo=timezone.utc)
+    s.insert_smc_structure(
+        ticker="NVDA", tf="5m", kind="bos_up", price=101.2,
+        ts=ts, ref_id=None, meta={}
+    )
+    s.insert_paper_trade(
+        ts=ts, ticker="NVDA", side="buy", qty=10, price=101.5,
+        reason="smc_bos_ob", signal_id=8,
+    )
+    r = client.get("/api/chart?ticker=NVDA&interval=5m&range_days=5")
+    assert r.status_code == 200
+    body = r.json()
+    assert len(body["candles"]) == 2
+    assert body["structures"][0]["kind"] == "bos_up"
+    assert body["trades"][0]["side"] == "buy"
