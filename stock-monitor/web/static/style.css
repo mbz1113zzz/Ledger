@@ -678,6 +678,16 @@ aside h2 {
   fill: var(--muted);
   font: 10px var(--f-mono);
 }
+.chart-label-bg {
+  fill: color-mix(in srgb, var(--panel) 90%, transparent);
+  stroke: color-mix(in srgb, var(--border) 85%, transparent);
+  stroke-width: 1;
+}
+.chart-label-text {
+  fill: var(--text);
+  font: 10px var(--f-mono);
+  letter-spacing: .02em;
+}
 .chart-legend {
   display: flex;
   gap: 14px;
@@ -698,6 +708,16 @@ aside h2 {
 .chart-legend .candle-down { background: #ef5350; }
 .chart-legend .struct-up { background: #42a5f5; border-radius: 50%; }
 .chart-legend .trade-buy { background: #ffb74d; clip-path: polygon(50% 0, 0 100%, 100% 100%); }
+.chart-subsection {
+  margin-top: 14px;
+}
+.chart-subtitle {
+  margin-bottom: 8px;
+  color: var(--text-2);
+  font: 11px var(--f-mono);
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 
 /* ---------- sources panel ---------- */

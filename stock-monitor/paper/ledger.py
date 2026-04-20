@@ -2,9 +2,12 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, time, timezone
+from zoneinfo import ZoneInfo
 
 from smc.types import SmcSignal
 from storage import Storage
+
+_ET = ZoneInfo("America/New_York")
 
 
 @dataclass(slots=True)
@@ -213,12 +216,21 @@ class Ledger:
     def day_pnl_pct(self, now: datetime | None = None) -> float:
         """Return today's realized+unrealized PnL as a fraction of day-open equity.
 
-        Uses the earliest paper_equity snapshot of the current UTC day as the
-        baseline. If no snapshot exists for today (e.g. first run), returns 0.0.
+        The "day" is anchored at US/Eastern midnight so the halt doesn't reset
+        mid-session (UTC midnight falls at 19:00/20:00 ET, i.e. during regular
+        trading). The baseline is the *last snapshot before* that boundary —
+        i.e. yesterday's close — so the first tick of today is measured against
+        a stable anchor rather than against itself.
         """
         now = now or datetime.now(timezone.utc)
-        day_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
-        row = self._storage.first_paper_equity_on_or_after(day_start)
+        now_et = now.astimezone(_ET)
+        day_start_et = datetime.combine(now_et.date(), time.min, tzinfo=_ET)
+        day_start_utc = day_start_et.astimezone(timezone.utc)
+        row = self._storage.last_paper_equity_before(day_start_utc)
+        if row is None:
+            # No prior session on record — fall back to first row of today so
+            # that a fresh deploy still gates reasonably once trades arrive.
+            row = self._storage.first_paper_equity_on_or_after(day_start_utc)
         if row is None:
             return 0.0
         start_equity = float(row["equity"])

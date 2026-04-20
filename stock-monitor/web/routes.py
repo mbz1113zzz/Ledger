@@ -248,6 +248,11 @@ def build_router(
             if datetime.fromisoformat(row["ts"]) >= since
         ]
         trades.sort(key=lambda row: row["ts"])
+        equity = [
+            row for row in storage.list_paper_equity(limit=4000)
+            if datetime.fromisoformat(row["ts"]) >= since
+        ]
+        equity.sort(key=lambda row: row["ts"])
 
         return {
             "ticker": ticker.upper(),
@@ -256,6 +261,7 @@ def build_router(
             "candles": candles,
             "structures": structures,
             "trades": trades,
+            "equity": equity,
         }
 
     @router.get("/stream")

@@ -43,6 +43,11 @@ class IbkrClient:
     async def connect_with_retry(self, max_attempts: int = 1_000_000) -> None:
         delay = 1
         attempt = 0
+        # Clear any stale handles from a previous (now-dead) session.
+        # After reconnect we must re-request market data; the old Ticker/BarList
+        # objects are tied to the defunct socket and stop emitting events.
+        self._tick_handles.clear()
+        self._bar_handles.clear()
         while attempt < max_attempts:
             try:
                 await self._ib.connectAsync(host=self._host, port=self._port,
@@ -86,12 +91,22 @@ class IbkrClient:
     def _handle_tick(self, ticker: str, ticker_obj) -> None:
         # ib_insync field name has varied across versions (last / marketPrice /
         # close); fall back through candidates and log once if all are missing.
+        # NOTE: on older ib_insync, `marketPrice` is a bound method rather than
+        # an attribute — skip callables. IBKR also emits `-1.0` as a sentinel
+        # for "no trade yet" on some instruments; treat non-positive as absent.
         price = None
         for attr in ("last", "marketPrice", "close", "bid", "ask"):
             val = getattr(ticker_obj, attr, None)
-            if val is not None and not _is_nan(val):
-                price = val
-                break
+            if val is None or callable(val) or _is_nan(val):
+                continue
+            try:
+                v = float(val)
+            except (TypeError, ValueError):
+                continue
+            if v <= 0:
+                continue
+            price = v
+            break
         if price is None:
             if not getattr(self, "_warned_tick_fields", False):
                 log.warning("IBKR tick has no usable price field for %s; obj=%r",

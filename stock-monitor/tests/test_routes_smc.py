@@ -139,9 +139,11 @@ def test_chart_route_returns_candles_structures_and_trades(client, monkeypatch):
         ts=ts, ticker="NVDA", side="buy", qty=10, price=101.5,
         reason="smc_bos_ob", signal_id=8,
     )
+    s.record_paper_equity(ts=ts, cash=9000.0, positions_value=1015.0, equity=10015.0)
     r = client.get("/api/chart?ticker=NVDA&interval=5m&range_days=5")
     assert r.status_code == 200
     body = r.json()
     assert len(body["candles"]) == 2
     assert body["structures"][0]["kind"] == "bos_up"
     assert body["trades"][0]["side"] == "buy"
+    assert body["equity"][0]["equity"] == 10015.0

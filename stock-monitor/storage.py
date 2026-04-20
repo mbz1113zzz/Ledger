@@ -377,6 +377,14 @@ class Storage:
         ).fetchone()
         return dict(row) if row is not None else None
 
+    def last_paper_equity_before(self, ts: datetime) -> dict | None:
+        """Latest equity snapshot strictly before `ts` (previous-session close)."""
+        row = self._conn.execute(
+            "SELECT * FROM paper_equity WHERE ts < ? ORDER BY ts DESC LIMIT 1",
+            (ts.isoformat(),),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
     def _row_to_event(self, row: sqlite3.Row) -> Event:
         keys = row.keys()
         return Event(

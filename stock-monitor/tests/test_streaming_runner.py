@@ -29,13 +29,16 @@ async def test_tick_triggers_anomaly_persist():
         cooldown_sec=300,
     )
     await runner.start()
-    ts0 = datetime(2026, 4, 19, 14, 30, 0, tzinfo=timezone.utc)
-    runner._buf.set_open("NVDA", 100.0, ts0)
-    runner._buf.update("NVDA", 100.0, ts0)
-    ts1 = datetime(2026, 4, 19, 14, 31, 5, tzinfo=timezone.utc)
-    await runner.on_tick("NVDA", 101.2, ts1)
-    evs = s.query(ticker="NVDA", limit=10)
-    assert any(e.importance == "medium" for e in evs)
+    try:
+        ts0 = datetime(2026, 4, 19, 14, 30, 0, tzinfo=timezone.utc)
+        runner._buf.set_open("NVDA", 100.0, ts0)
+        runner._buf.update("NVDA", 100.0, ts0)
+        ts1 = datetime(2026, 4, 19, 14, 31, 5, tzinfo=timezone.utc)
+        await runner.on_tick("NVDA", 101.2, ts1)
+        evs = s.query(ticker="NVDA", limit=10)
+        assert any(e.importance == "medium" for e in evs)
+    finally:
+        await runner.stop()
 
 
 async def test_bar_feeds_smc_pipeline():
@@ -50,17 +53,20 @@ async def test_bar_feeds_smc_pipeline():
         cooldown_sec=300,
     )
     await runner.start()
-    base = datetime(2026, 4, 19, 14, 0, 0, tzinfo=timezone.utc)
-    for minute in range(6):
-        for sec in range(0, 60, 5):
-            ts = base.replace(minute=minute, second=sec)
-            await runner.on_bar("NVDA", {"ts": ts, "o": 100, "h": 101,
-                                          "l": 99, "c": 100, "v": 100})
-    ts = base.replace(minute=6, second=0)
-    await runner.on_bar("NVDA", {"ts": ts, "o": 100, "h": 100,
-                                 "l": 100, "c": 100, "v": 100})
-    rows = s.query_smc_structure(ticker="NVDA")
-    assert isinstance(rows, list)
+    try:
+        base = datetime(2026, 4, 19, 14, 0, 0, tzinfo=timezone.utc)
+        for minute in range(6):
+            for sec in range(0, 60, 5):
+                ts = base.replace(minute=minute, second=sec)
+                await runner.on_bar("NVDA", {"ts": ts, "o": 100, "h": 101,
+                                              "l": 99, "c": 100, "v": 100})
+        ts = base.replace(minute=6, second=0)
+        await runner.on_bar("NVDA", {"ts": ts, "o": 100, "h": 100,
+                                     "l": 100, "c": 100, "v": 100})
+        rows = s.query_smc_structure(ticker="NVDA")
+        assert isinstance(rows, list)
+    finally:
+        await runner.stop()
 
 
 async def test_runner_tolerates_ibkr_disabled(monkeypatch):
@@ -89,7 +95,10 @@ async def test_start_times_out_when_ibkr_unavailable():
         startup_timeout_sec=0.01,
     )
     await runner.start()
-    fake_client.set_tickers.assert_not_called()
+    try:
+        fake_client.set_tickers.assert_not_called()
+    finally:
+        await runner.stop()
     await runner.stop()
 
 

@@ -334,9 +334,7 @@ function buildEquityCurveSvg(points) {
   const last = ys[ys.length - 1];
   const up = last >= first;
   const stroke = up ? '#67b87b' : '#ef5350';
-  const fill = up
-    ? 'color-mix(in srgb, #67b87b 22%, transparent)'
-    : 'color-mix(in srgb, #ef5350 22%, transparent)';
+  const fill = up ? 'rgba(103,184,123,0.18)' : 'rgba(239,83,80,0.18)';
   const path = points.map((p, i) => {
     const cmd = i === 0 ? 'M' : 'L';
     return `${cmd}${sx(new Date(p.ts).getTime()).toFixed(1)},${sy(ys[i]).toFixed(1)}`;
@@ -375,6 +373,20 @@ function buildEquityCurveSvg(points) {
       <path d="${path}" fill="none" stroke="${stroke}" stroke-width="1.6"/>
       ${xTicks}
     </svg>`;
+}
+
+function buildChartStructureLabel(s) {
+  const map = {
+    bos_up: 'BOS↑',
+    bos_down: 'BOS↓',
+    choch_up: 'CHoCH↑',
+    choch_down: 'CHoCH↓',
+    ob_bull: 'OB Bull',
+    ob_bear: 'OB Bear',
+    liq_sweep_high: 'Sweep↑',
+    liq_sweep_low: 'Sweep↓',
+  };
+  return map[s.kind] || s.kind;
 }
 
 async function openPaperEquity() {
@@ -534,10 +546,18 @@ function renderSvgChart(data) {
     const x = tsToX(s.ts);
     const y = priceToY(Number(s.price));
     const color = chartColorForStructure(s.kind);
+    const label = buildChartStructureLabel(s);
+    const showLabel = !String(s.kind).startsWith('swing_');
+    const labelW = Math.max(34, label.length * 6.4 + 8);
+    const labelY = Math.max(top + 10, y - 12);
     return `
       <circle cx="${x}" cy="${y}" r="4" fill="${color}" class="chart-structure">
         <title>${s.kind} @ ${Number(s.price).toFixed(2)} · ${new Date(s.ts).toLocaleString('zh-CN')}</title>
       </circle>
+      ${showLabel ? `
+        <rect x="${(x + 7).toFixed(1)}" y="${(labelY - 9).toFixed(1)}" width="${labelW.toFixed(1)}" height="16" rx="4" class="chart-label-bg" />
+        <text x="${(x + 11).toFixed(1)}" y="${(labelY + 2).toFixed(1)}" class="chart-label-text">${label}</text>
+      ` : ''}
     `;
   }).join('');
 
@@ -565,6 +585,15 @@ function renderSvgChart(data) {
       return `<text x="${x}" y="${height - 12}" class="chart-axis-label" text-anchor="middle">${txt}</text>`;
     }).join('');
 
+  const equitySvg = (data.equity && data.equity.length)
+    ? `
+      <div class="chart-subsection">
+        <div class="chart-subtitle">Equity Curve</div>
+        ${buildEquityCurveSvg(data.equity)}
+      </div>
+    `
+    : '';
+
   return `
     <div class="chart-summary">
       <span><b>${escapeHtml(data.ticker)}</b> · ${escapeHtml(data.interval)} · ${candles.length} candles</span>
@@ -584,6 +613,7 @@ function renderSvgChart(data) {
       <span><i class="lg struct-up"></i> Structure</span>
       <span><i class="lg trade-buy"></i> Trade</span>
     </div>
+    ${equitySvg}
   `;
 }
 

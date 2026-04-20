@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from paper.ledger import Ledger
 from paper.pricing import PriceBook
@@ -10,6 +11,9 @@ from paper.strategy import SmcLongStrategy
 from smc.types import SmcSignal
 
 log = logging.getLogger(__name__)
+
+_ET = ZoneInfo("America/New_York")
+_PUSH_TIMEOUT_SEC = 5.0
 
 
 class PaperBroker:
@@ -40,6 +44,9 @@ class PaperBroker:
         # When circuit breaker trips we stop opening new positions for the day
         # but still manage existing ones.
         self._halted_day: str | None = None
+        # Strong refs to fire-and-forget notification tasks so the GC doesn't
+        # eat them mid-flight and spam "Task was destroyed" warnings.
+        self._pending_tasks: set[asyncio.Task] = set()
 
     @property
     def ledger(self) -> Ledger:
@@ -49,7 +56,9 @@ class PaperBroker:
 
     def _check_risk_gate(self, now: datetime) -> str | None:
         """Return a human-readable reason if a new entry should be blocked."""
-        day_key = now.astimezone(timezone.utc).date().isoformat()
+        # Day is scoped to US/Eastern so the halt survives the UTC midnight
+        # that falls mid-session in winter.
+        day_key = now.astimezone(_ET).date().isoformat()
         if self._halted_day == day_key:
             return "day halted"
         if len(self._ledger.positions()) >= self._max_positions:
@@ -73,28 +82,46 @@ class PaperBroker:
 
     # ----- event emission -----
 
+    def _track(self, coro, *, label: str) -> None:
+        """Dispatch `coro` as a background task with retention + error logging."""
+        try:
+            task = asyncio.create_task(coro)
+        except RuntimeError:
+            # No running loop (sync test context) — drop quietly.
+            coro.close()
+            return
+        self._pending_tasks.add(task)
+
+        def _done(t: asyncio.Task, _label=label):
+            self._pending_tasks.discard(t)
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                log.warning("paper notification [%s] failed: %r", _label, exc)
+
+        task.add_done_callback(_done)
+
+    async def _bounded_push(self, title: str, body: str) -> None:
+        try:
+            await asyncio.wait_for(
+                self._push_hub.broadcast_text(title, body),
+                timeout=_PUSH_TIMEOUT_SEC,
+            )
+        except asyncio.TimeoutError:
+            log.warning("paper push timed out after %.1fs: %s", _PUSH_TIMEOUT_SEC, title)
+
     def _emit_event(self, payload: dict, *, push_text: tuple[str, str] | None = None) -> None:
         """Publish to in-process SSE and optionally broadcast to push channels.
 
         Fire-and-forget: we never let notification failures affect trading.
         """
         if self._notifier is not None:
-            try:
-                asyncio.create_task(self._notifier.publish(payload))
-            except RuntimeError:
-                # No running loop (e.g. called from a sync test context)
-                pass
-            except Exception as e:
-                log.exception("notifier publish failed: %s", e)
+            self._track(self._notifier.publish(payload), label="sse")
         if push_text is not None and self._push_hub is not None \
                 and getattr(self._push_hub, "enabled", False):
             title, body = push_text
-            try:
-                asyncio.create_task(self._push_hub.broadcast_text(title, body))
-            except RuntimeError:
-                pass
-            except Exception as e:
-                log.exception("push broadcast failed: %s", e)
+            self._track(self._bounded_push(title, body), label="push")
 
     @staticmethod
     def _fmt_open(pos_dict: dict) -> tuple[str, str]:
