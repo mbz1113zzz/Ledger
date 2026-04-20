@@ -481,10 +481,40 @@ aside h2 {
     border-right: none;
     border-bottom: 1px solid var(--border);
     padding: 16px 20px;
+    max-height: 45vh;
   }
   #feed { padding: 20px; }
   h1 { font-size: 22px; }
   h1 .sub { display: none; }
+  .controls { flex-wrap: wrap; gap: 6px; }
+  .summary { font-size: 11px; width: 100%; margin-right: 0; order: 3; }
+}
+
+@media (max-width: 560px) {
+  header { padding: 12px 16px 10px; flex-wrap: wrap; gap: 8px; }
+  header .brand { flex: 1 1 auto; }
+  h1 { font-size: 18px; }
+  aside { padding: 12px 14px; max-height: 50vh; }
+  #feed { padding: 14px 16px 40px; }
+  .card { padding: 12px 14px 12px 20px; }
+  .card .head { flex-wrap: wrap; gap: 6px; }
+  .card .title { font-size: 14px; }
+  .card .summary { font-size: 13px; }
+  .paper-stats { grid-template-columns: 1fr 1fr; }
+  .paper-pos-head { flex-wrap: wrap; }
+  .modal-card { padding: 16px 18px; width: 94vw; max-height: 86vh; border-radius: 10px; }
+  .modal-body table { font-size: 11px; }
+  .modal-body th, .modal-body td { padding: 5px 6px; }
+  /* Allow horizontally-overflowing tables (e.g. trades) to scroll */
+  .modal-body { overflow-x: auto; }
+  .chart-svg { min-height: 220px; }
+}
+
+/* Touch targets: larger hit areas on coarse pointers */
+@media (pointer: coarse) {
+  .icon-btn { width: 36px; height: 36px; }
+  #watchlist .del { opacity: 1; padding: 4px 8px; }
+  .tool-btn { padding: 11px 14px; }
 }
 
 /* ============== STAGGERED LOAD ============== */

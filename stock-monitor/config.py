@@ -19,6 +19,10 @@ EARNINGS_CALENDAR_MINUTE = 5
 DB_PATH = os.getenv("DB_PATH", str(ROOT / "data" / "events.db"))
 WATCHLIST_PATH = os.getenv("WATCHLIST_PATH", str(ROOT / "watchlist.json"))
 RETAIN_DAYS = 30
+BACKUP_ENABLED = os.getenv("BACKUP_ENABLED", "1") == "1"
+BACKUP_HOUR = int(os.getenv("BACKUP_HOUR", "3"))  # local time
+BACKUP_MINUTE = int(os.getenv("BACKUP_MINUTE", "30"))
+BACKUP_KEEP_DAYS = int(os.getenv("BACKUP_KEEP_DAYS", "14"))
 PORT = 8000
 SEC_USER_AGENT = "stock-monitor research@example.com"  # SEC requires a UA
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
@@ -73,6 +77,8 @@ PAPER_MAX_RISK_PER_TRADE_PCT = float(
 PAPER_MAX_HOLD_MIN = int(os.getenv("PAPER_MAX_HOLD_MIN", "60"))
 PAPER_BREAK_EVEN_ENABLED = os.getenv("PAPER_BREAK_EVEN_ENABLED", "1") == "1"
 PAPER_BREAK_EVEN_R = float(os.getenv("PAPER_BREAK_EVEN_R", "1.0"))
+PAPER_MAX_POSITIONS = int(os.getenv("PAPER_MAX_POSITIONS", "5"))
+PAPER_MAX_DAY_DRAWDOWN_PCT = float(os.getenv("PAPER_MAX_DAY_DRAWDOWN_PCT", "0.03"))
 PAPER_EOD_HOUR_ET = int(os.getenv("PAPER_EOD_HOUR_ET", "15"))
 PAPER_EOD_MINUTE_ET = int(os.getenv("PAPER_EOD_MINUTE_ET", "50"))
 REVIEW_HOUR_ET = int(os.getenv("REVIEW_HOUR_ET", "16"))

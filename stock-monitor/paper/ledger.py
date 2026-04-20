@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, time, timezone
 
 from smc.types import SmcSignal
 from storage import Storage
@@ -209,6 +209,22 @@ class Ledger:
             "ts": ts.isoformat(),
             "equity": snap["equity"],
         }
+
+    def day_pnl_pct(self, now: datetime | None = None) -> float:
+        """Return today's realized+unrealized PnL as a fraction of day-open equity.
+
+        Uses the earliest paper_equity snapshot of the current UTC day as the
+        baseline. If no snapshot exists for today (e.g. first run), returns 0.0.
+        """
+        now = now or datetime.now(timezone.utc)
+        day_start = datetime.combine(now.date(), time.min, tzinfo=timezone.utc)
+        row = self._storage.first_paper_equity_on_or_after(day_start)
+        if row is None:
+            return 0.0
+        start_equity = float(row["equity"])
+        if start_equity <= 0:
+            return 0.0
+        return (self.equity_now() - start_equity) / start_equity
 
     def positions_payload(self) -> list[dict]:
         out = []

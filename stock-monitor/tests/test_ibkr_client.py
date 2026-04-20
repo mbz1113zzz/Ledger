@@ -1,3 +1,4 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sources.ibkr_realtime import IbkrClient
@@ -72,3 +73,37 @@ async def test_reconnect_uses_exponential_backoff(monkeypatch):
         await client.connect_with_retry(max_attempts=4)
     assert sleeps == [1, 2, 4]
     assert call_count["n"] == 4
+
+
+def test_handle_tick_falls_back_to_marketPrice_when_last_missing():
+    got = []
+    client = IbkrClient(host="x", port=1, client_id=1)
+    client.on_tick(lambda t, p, ts: got.append((t, p)))
+    # `last` is NaN (ib_insync default for no trades yet), marketPrice has value
+    obj = SimpleNamespace(last=float("nan"), marketPrice=123.45, close=None)
+    client._handle_tick("NVDA", obj)
+    assert got == [("NVDA", 123.45)]
+
+
+def test_handle_tick_tolerates_all_missing():
+    client = IbkrClient(host="x", port=1, client_id=1)
+    called = []
+    client.on_tick(lambda t, p, ts: called.append((t, p)))
+    obj = SimpleNamespace(last=None, marketPrice=None, close=None, bid=None, ask=None)
+    client._handle_tick("NVDA", obj)  # should not raise
+    assert called == []
+
+
+def test_handle_bar_accepts_open_instead_of_open_():
+    import datetime as dt
+    got = []
+    client = IbkrClient(host="x", port=1, client_id=1)
+    client.on_bar(lambda t, b: got.append((t, b)))
+    bar = SimpleNamespace(
+        time=dt.datetime(2026, 4, 20, 14, 30, 0),
+        # open (no trailing underscore) — future ib_insync variant
+        open=10.0, high=11.0, low=9.5, close=10.5, volume=100,
+    )
+    client._handle_bar("NVDA", [bar], True)
+    assert len(got) == 1
+    assert got[0][1]["o"] == 10.0

@@ -110,6 +110,79 @@ async def test_break_even_stop_moves_to_entry_and_exits_flat():
     assert round(closed[0]["pnl"], 4) == 0.0
 
 
+class _FakeNotifier:
+    def __init__(self):
+        self.events = []
+
+    async def publish(self, payload):
+        self.events.append(payload)
+
+
+class _FakeHub:
+    enabled = True
+
+    def __init__(self):
+        self.texts = []
+
+    async def broadcast_text(self, title, body):
+        self.texts.append((title, body))
+
+
+async def test_open_and_close_publish_notifications():
+    storage = _storage()
+    notifier = _FakeNotifier()
+    hub = _FakeHub()
+    broker = PaperBroker(
+        ledger=Ledger(storage), strategy=SmcLongStrategy(),
+        prices=PriceBook(), max_hold_min=60,
+        notifier=notifier, push_hub=hub,
+    )
+    await broker.on_smc_signal(_signal())
+    await broker.on_tick("NVDA", 102.5,
+                          datetime(2026, 4, 19, 14, 35, tzinfo=timezone.utc))
+    # Let scheduled publish tasks run
+    import asyncio as _a
+    await _a.sleep(0)
+    await _a.sleep(0)
+    actions = [e["action"] for e in notifier.events]
+    assert "open" in actions and "close" in actions
+    # tp close should produce a push
+    assert any("CLOSE tp" in t[0] for t in hub.texts)
+    assert any("OPEN long" in t[0] for t in hub.texts)
+
+
+async def test_max_positions_gate_blocks_additional_opens():
+    storage = _storage()
+    broker = PaperBroker(
+        ledger=Ledger(storage), strategy=SmcLongStrategy(),
+        prices=PriceBook(), max_hold_min=60, max_positions=1,
+    )
+    await broker.on_smc_signal(_signal())
+    sig2 = SmcSignal(
+        ts=datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc),
+        ticker="TSLA", entry=200.0, sl=198.0, tp=204.0, reason="smc_bos_ob",
+    )
+    opened = await broker.on_smc_signal(sig2)
+    assert opened is None
+    assert len(broker.ledger.positions_payload()) == 1
+
+
+async def test_day_drawdown_circuit_breaker_halts_new_entries():
+    storage = _storage()
+    ts = datetime(2026, 4, 19, 14, 0, tzinfo=timezone.utc)
+    # Seed day-start equity at 10_000, then force a big drawdown snapshot.
+    storage.record_paper_equity(ts=ts, cash=10_000, positions_value=0, equity=10_000)
+    storage.record_paper_equity(
+        ts=ts.replace(hour=14, minute=30), cash=9_600, positions_value=0, equity=9_600,
+    )
+    broker = PaperBroker(
+        ledger=Ledger(storage), strategy=SmcLongStrategy(),
+        prices=PriceBook(), max_hold_min=60, max_day_drawdown_pct=0.03,
+    )
+    opened = await broker.on_smc_signal(_signal())
+    assert opened is None
+
+
 async def test_short_signal_opens_and_takes_profit():
     storage = _storage()
     broker = PaperBroker(

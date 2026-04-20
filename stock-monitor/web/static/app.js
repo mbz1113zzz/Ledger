@@ -318,16 +318,78 @@ async function openPaperTrades() {
   }
 }
 
+function buildEquityCurveSvg(points) {
+  // points: array of {ts, equity} oldest→newest
+  if (!points.length) return '';
+  const W = 620, H = 180, PAD_L = 48, PAD_R = 12, PAD_T = 14, PAD_B = 24;
+  const xs = points.map(p => new Date(p.ts).getTime());
+  const ys = points.map(p => Number(p.equity));
+  const xMin = xs[0], xMax = xs[xs.length - 1] || xs[0] + 1;
+  const yMin = Math.min(...ys), yMax = Math.max(...ys);
+  const yPad = (yMax - yMin) * 0.08 || Math.max(1, yMax * 0.005);
+  const yLo = yMin - yPad, yHi = yMax + yPad;
+  const sx = t => PAD_L + ((t - xMin) / Math.max(1, xMax - xMin)) * (W - PAD_L - PAD_R);
+  const sy = v => PAD_T + (1 - (v - yLo) / Math.max(1e-9, yHi - yLo)) * (H - PAD_T - PAD_B);
+  const first = ys[0];
+  const last = ys[ys.length - 1];
+  const up = last >= first;
+  const stroke = up ? '#67b87b' : '#ef5350';
+  const fill = up
+    ? 'color-mix(in srgb, #67b87b 22%, transparent)'
+    : 'color-mix(in srgb, #ef5350 22%, transparent)';
+  const path = points.map((p, i) => {
+    const cmd = i === 0 ? 'M' : 'L';
+    return `${cmd}${sx(new Date(p.ts).getTime()).toFixed(1)},${sy(ys[i]).toFixed(1)}`;
+  }).join(' ');
+  const areaPath = `${path} L${sx(xMax).toFixed(1)},${sy(yLo).toFixed(1)} L${sx(xMin).toFixed(1)},${sy(yLo).toFixed(1)} Z`;
+  // Y-axis ticks
+  const ticks = 4;
+  const tickLines = [];
+  for (let i = 0; i <= ticks; i++) {
+    const v = yLo + ((yHi - yLo) * i) / ticks;
+    const y = sy(v);
+    tickLines.push(
+      `<line class="chart-grid" x1="${PAD_L}" x2="${W - PAD_R}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"/>` +
+      `<text class="chart-axis-label" x="${PAD_L - 6}" y="${(y + 3).toFixed(1)}" text-anchor="end">${v.toFixed(0)}</text>`
+    );
+  }
+  const fmtT = ms => {
+    const d = new Date(ms);
+    return d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+  };
+  const xTicks = [xMin, xMin + (xMax - xMin) / 2, xMax].map(t =>
+    `<text class="chart-axis-label" x="${sx(t).toFixed(1)}" y="${H - 6}" text-anchor="middle">${fmtT(t)}</text>`
+  ).join('');
+  const pct = first > 0 ? ((last - first) / first) * 100 : 0;
+  const summary = `
+    <div class="chart-summary">
+      <span>起 ${first.toFixed(2)}</span>
+      <span>终 ${last.toFixed(2)}</span>
+      <span class="${pct >= 0 ? 'pos' : 'neg'}">${pct >= 0 ? '+' : ''}${pct.toFixed(2)}%</span>
+      <span>样本 ${points.length}</span>
+    </div>`;
+  return summary + `
+    <svg class="chart-svg" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="equity curve">
+      ${tickLines.join('')}
+      <path d="${areaPath}" fill="${fill}" stroke="none"/>
+      <path d="${path}" fill="none" stroke="${stroke}" stroke-width="1.6"/>
+      ${xTicks}
+    </svg>`;
+}
+
 async function openPaperEquity() {
   openModal('权益快照', '<p class="empty-note">加载中…</p>');
   try {
-    const r = await fetch('/api/paper/equity?limit=50');
+    const r = await fetch('/api/paper/equity?limit=200');
     const d = await r.json();
     if (!d.equity.length) {
       openModal('权益快照', '<p class="empty-note">暂无权益快照</p>');
       return;
     }
-    const rows = d.equity.map(t => `
+    // API returns newest first; flip for chronological chart
+    const ordered = [...d.equity].reverse();
+    const curve = buildEquityCurveSvg(ordered);
+    const rows = d.equity.slice(0, 50).map(t => `
       <tr>
         <td class="win">${new Date(t.ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</td>
         <td>${Number(t.cash).toFixed(2)}</td>
@@ -336,6 +398,7 @@ async function openPaperEquity() {
       </tr>
     `).join('');
     openModal('权益快照', `
+      ${curve}
       <table>
         <thead><tr><th style="text-align:left">时间</th><th>Cash</th><th>持仓市值</th><th>Equity</th></tr></thead>
         <tbody>${rows}</tbody>

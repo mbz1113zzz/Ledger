@@ -79,8 +79,26 @@ CREATE TABLE IF NOT EXISTS paper_positions (
 class Storage:
     def __init__(self, db_path: str):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
+        self._db_path = db_path
         self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
+
+    @property
+    def db_path(self) -> str:
+        return self._db_path
+
+    def backup_to(self, dest_path: str) -> str:
+        """Create a hot copy of the database using SQLite's online backup API.
+
+        Works while the app continues to read/write (WAL-friendly). Returns the
+        absolute path of the backup file that was written.
+        """
+        dest = Path(dest_path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        # Use a fresh dest connection so we don't alter our main connection.
+        with sqlite3.connect(str(dest)) as dest_conn:
+            self._conn.backup(dest_conn)
+        return str(dest.resolve())
 
     def init_schema(self) -> None:
         # WAL mode: readers never block writers; enables concurrent access
@@ -348,6 +366,14 @@ class Storage:
     def last_paper_equity(self) -> dict | None:
         row = self._conn.execute(
             "SELECT * FROM paper_equity ORDER BY ts DESC LIMIT 1"
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def first_paper_equity_on_or_after(self, ts: datetime) -> dict | None:
+        """Earliest equity snapshot on or after `ts` (used as day-open baseline)."""
+        row = self._conn.execute(
+            "SELECT * FROM paper_equity WHERE ts >= ? ORDER BY ts ASC LIMIT 1",
+            (ts.isoformat(),),
         ).fetchone()
         return dict(row) if row is not None else None
 

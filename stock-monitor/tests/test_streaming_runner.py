@@ -1,3 +1,4 @@
+import asyncio
 import tempfile
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock
@@ -89,3 +90,31 @@ async def test_start_times_out_when_ibkr_unavailable():
     )
     await runner.start()
     fake_client.set_tickers.assert_not_called()
+    await runner.stop()
+
+
+async def test_watchdog_reconnects_when_client_drops():
+    s = _storage()
+    fake_client = MagicMock()
+    fake_client.connect_with_retry = AsyncMock()
+    fake_client.set_tickers = MagicMock()
+    fake_client.on_tick = MagicMock()
+    fake_client.on_bar = MagicMock()
+    fake_client.disconnect = AsyncMock()
+    # Simulate: alive at start, then drops, then alive again after reconnect.
+    alive_states = iter([False, False, True, True, True])
+    fake_client.is_alive = MagicMock(side_effect=lambda: next(alive_states, True))
+
+    runner = StreamingRunner(
+        client=fake_client, storage=s, notifier=Notifier(), push_hub=None,
+        tickers=["NVDA"], tiers=[("high", 0.03)], cooldown_sec=300,
+    )
+    runner._watchdog_interval_sec = 0.02
+    await runner.start()
+    # Give the watchdog a few ticks to observe the drop and reconnect.
+    await asyncio.sleep(0.2)
+    await runner.stop()
+    # connect_with_retry called at least twice: once at start, once by watchdog.
+    assert fake_client.connect_with_retry.await_count >= 2
+    # set_tickers called for initial subscribe and for watchdog reconnect.
+    assert fake_client.set_tickers.call_count >= 2

@@ -117,6 +117,10 @@ def create_app() -> FastAPI:
         max_hold_min=config.PAPER_MAX_HOLD_MIN,
         break_even_enabled=config.PAPER_BREAK_EVEN_ENABLED,
         break_even_r=config.PAPER_BREAK_EVEN_R,
+        max_positions=config.PAPER_MAX_POSITIONS,
+        max_day_drawdown_pct=config.PAPER_MAX_DAY_DRAWDOWN_PCT,
+        notifier=notifier,
+        push_hub=push_hub,
     )
 
     app = FastAPI(title="Stock Event Monitor", lifespan=lifespan)

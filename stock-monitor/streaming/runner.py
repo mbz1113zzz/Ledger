@@ -56,6 +56,9 @@ class StreamingRunner:
         self._smc_min_rr = smc_min_rr
         self._smc_tick_size = smc_tick_size
         self._loop: asyncio.AbstractEventLoop | None = None
+        self._stopping = False
+        self._watchdog_task: asyncio.Task | None = None
+        self._watchdog_interval_sec = 30.0
         self._aggregator.on_closed(self._on_candle_closed_sync)
 
     def _smc_for(self, ticker: str) -> tuple[StructureTracker, OrderBlockIndex, LiquidityPoolIndex, SmcEngine]:
@@ -79,6 +82,7 @@ class StreamingRunner:
 
     async def start(self) -> None:
         self._loop = asyncio.get_running_loop()
+        self._stopping = False
         self._client.on_tick(self._tick_bridge)
         self._client.on_bar(self._bar_bridge)
         try:
@@ -89,6 +93,37 @@ class StreamingRunner:
             self._client.set_tickers(self._tickers)
         except Exception as e:
             log.warning("IBKR start failed: %s (running without live data)", e)
+        self._watchdog_task = asyncio.create_task(self._watchdog_loop())
+
+    async def _watchdog_loop(self) -> None:
+        """Periodically verify the live-data client is connected; reconnect if not.
+
+        ib_insync usually auto-recovers, but when TWS/Gateway is restarted the
+        client can silently stay disconnected. The watchdog detects that and
+        calls connect_with_retry + re-subscribes.
+        """
+        while not self._stopping:
+            try:
+                await asyncio.sleep(self._watchdog_interval_sec)
+            except asyncio.CancelledError:
+                return
+            if self._stopping:
+                return
+            try:
+                alive = self._client.is_alive() if hasattr(self._client, "is_alive") else True
+            except Exception as e:
+                log.warning("watchdog health check raised: %s", e)
+                alive = False
+            if alive:
+                continue
+            log.warning("streaming watchdog: client disconnected, reconnecting…")
+            try:
+                await self._client.connect_with_retry(max_attempts=5)
+                self._client.set_tickers(self._tickers)
+                log.info("streaming watchdog: reconnected + resubscribed %d tickers",
+                         len(self._tickers))
+            except Exception as e:
+                log.warning("streaming watchdog reconnect failed: %s", e)
 
     def set_tickers(self, tickers: list[str]) -> None:
         self._tickers = list(tickers)
@@ -158,6 +193,13 @@ class StreamingRunner:
                 await self._paper_broker.on_smc_signal(sig, signal_id=signal_id)
 
     async def stop(self) -> None:
+        self._stopping = True
+        if self._watchdog_task is not None and not self._watchdog_task.done():
+            self._watchdog_task.cancel()
+            try:
+                await self._watchdog_task
+            except (asyncio.CancelledError, Exception):
+                pass
         try:
             await self._client.disconnect()
         except Exception:

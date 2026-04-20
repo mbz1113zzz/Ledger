@@ -6,6 +6,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 import config
+from backup import backup_database
 from paper.review import send_daily_review
 from digest import send_digest
 from enricher import Enricher
@@ -116,6 +117,12 @@ def start_scheduler(
         CronTrigger(hour=config.EARNINGS_CALENDAR_HOUR, minute=config.EARNINGS_CALENDAR_MINUTE),
         id="daily_cleanup",
     )
+    if config.BACKUP_ENABLED:
+        scheduler.add_job(
+            lambda: backup_database(storage, keep_days=config.BACKUP_KEEP_DAYS),
+            CronTrigger(hour=config.BACKUP_HOUR, minute=config.BACKUP_MINUTE),
+            id="daily_sqlite_backup",
+        )
     if config.DIGEST_ENABLED and push_hub is not None:
         scheduler.add_job(
             send_digest,
