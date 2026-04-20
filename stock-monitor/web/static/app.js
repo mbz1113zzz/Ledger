@@ -475,7 +475,40 @@ function chartColorForStructure(kind) {
   return '#9e9e9e';
 }
 
+function buildVolumeSvg(candles) {
+  if (!candles.length) return '';
+  const W = 620, H = 120, PAD_L = 48, PAD_R = 12, PAD_T = 12, PAD_B = 22;
+  const vols = candles.map(c => Number(c.v || 0));
+  const maxV = Math.max(...vols, 1);
+  const step = (W - PAD_L - PAD_R) / Math.max(candles.length, 1);
+  const barW = Math.max(2, Math.min(10, step * 0.66));
+  const bars = candles.map((c, i) => {
+    const x = PAD_L + i * step + step / 2 - barW / 2;
+    const h = ((Number(c.v || 0) / maxV) * (H - PAD_T - PAD_B));
+    const y = H - PAD_B - h;
+    const color = c.c >= c.o ? 'rgba(103,184,123,0.6)' : 'rgba(239,83,80,0.6)';
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW}" height="${h.toFixed(1)}" fill="${color}" />`;
+  }).join('');
+  return `
+    <div class="chart-subsection">
+      <div class="chart-subtitle">Volume</div>
+      <svg class="chart-svg chart-svg-sm" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-label="volume bars">
+        <line class="chart-grid" x1="${PAD_L}" x2="${W - PAD_R}" y1="${H - PAD_B}" y2="${H - PAD_B}" />
+        ${bars}
+      </svg>
+    </div>
+  `;
+}
+
 function renderSvgChart(data) {
+  const toggles = data.toggles || {
+    structures: true,
+    trades: true,
+    liquidity: true,
+    orderBlocks: true,
+    volume: true,
+    equity: true,
+  };
   const candles = data.candles || [];
   if (!candles.length) {
     return '<p class="empty-note">该区间没有可用价格数据</p>';
@@ -542,7 +575,7 @@ function renderSvgChart(data) {
     `;
   }).join('');
 
-  const structureSvg = (data.structures || []).map((s) => {
+  const structureSvg = toggles.structures ? (data.structures || []).map((s) => {
     const x = tsToX(s.ts);
     const y = priceToY(Number(s.price));
     const color = chartColorForStructure(s.kind);
@@ -559,9 +592,36 @@ function renderSvgChart(data) {
         <text x="${(x + 11).toFixed(1)}" y="${(labelY + 2).toFixed(1)}" class="chart-label-text">${label}</text>
       ` : ''}
     `;
-  }).join('');
+  }).join('') : '';
 
-  const tradeSvg = (data.trades || []).map((t) => {
+  const orderBlockSvg = toggles.orderBlocks ? (data.order_blocks || []).map((ob) => {
+    const x = tsToX(ob.ts);
+    const y1 = priceToY(Number(ob.high));
+    const y2 = priceToY(Number(ob.low));
+    const widthBand = Math.max(step * 1.8, 24);
+    const fill = ob.kind === 'ob_bull' ? 'rgba(66,165,245,0.16)' : 'rgba(171,71,188,0.16)';
+    return `
+      <rect x="${(x - widthBand / 2).toFixed(1)}" y="${Math.min(y1, y2).toFixed(1)}"
+            width="${widthBand.toFixed(1)}" height="${Math.abs(y2 - y1).toFixed(1)}"
+            fill="${fill}" class="chart-ob-band">
+        <title>${ob.kind} ${Number(ob.low).toFixed(2)} - ${Number(ob.high).toFixed(2)}</title>
+      </rect>
+    `;
+  }).join('') : '';
+
+  const liquiditySvg = toggles.liquidity ? (data.liquidity || []).map((liq) => {
+    const y = priceToY(Number(liq.price));
+    const stroke = liq.side === 'high' ? '#ffa726' : '#26c6da';
+    const dash = liq.active ? '6 4' : '2 5';
+    return `
+      <line x1="${left}" x2="${width - right}" y1="${y.toFixed(1)}" y2="${y.toFixed(1)}"
+            stroke="${stroke}" stroke-width="1.1" stroke-dasharray="${dash}" class="chart-liq-line">
+        <title>${liq.side} liquidity @ ${Number(liq.price).toFixed(2)} ${liq.active ? 'active' : 'swept'}</title>
+      </line>
+    `;
+  }).join('') : '';
+
+  const tradeSvg = toggles.trades ? (data.trades || []).map((t) => {
     const x = tsToX(t.ts);
     const y = priceToY(Number(t.price));
     const isBuy = t.side === 'buy';
@@ -574,7 +634,7 @@ function renderSvgChart(data) {
         <title>${t.side} ${t.reason} @ ${Number(t.price).toFixed(2)} · ${new Date(t.ts).toLocaleString('zh-CN')}</title>
       </polygon>
     `;
-  }).join('');
+  }).join('') : '';
 
   const axisLabels = candles.filter((_, i) => i % Math.max(1, Math.floor(candles.length / 6)) === 0)
     .map((c, i) => {
@@ -585,7 +645,7 @@ function renderSvgChart(data) {
       return `<text x="${x}" y="${height - 12}" class="chart-axis-label" text-anchor="middle">${txt}</text>`;
     }).join('');
 
-  const equitySvg = (data.equity && data.equity.length)
+  const equitySvg = (toggles.equity && data.equity && data.equity.length)
     ? `
       <div class="chart-subsection">
         <div class="chart-subtitle">Equity Curve</div>
@@ -593,16 +653,29 @@ function renderSvgChart(data) {
       </div>
     `
     : '';
+  const volumeSvg = toggles.volume ? buildVolumeSvg(candles) : '';
 
   return `
     <div class="chart-summary">
       <span><b>${escapeHtml(data.ticker)}</b> · ${escapeHtml(data.interval)} · ${candles.length} candles</span>
       <span>Structure ${data.structures.length}</span>
+      <span>OB ${data.order_blocks.length}</span>
+      <span>Liq ${data.liquidity.length}</span>
       <span>Trades ${data.trades.length}</span>
+    </div>
+    <div class="chart-toggles">
+      <button class="chart-toggle ${toggles.structures ? 'on' : ''}" data-toggle="structures">Structure</button>
+      <button class="chart-toggle ${toggles.orderBlocks ? 'on' : ''}" data-toggle="orderBlocks">OB</button>
+      <button class="chart-toggle ${toggles.liquidity ? 'on' : ''}" data-toggle="liquidity">Liquidity</button>
+      <button class="chart-toggle ${toggles.trades ? 'on' : ''}" data-toggle="trades">Trades</button>
+      <button class="chart-toggle ${toggles.volume ? 'on' : ''}" data-toggle="volume">Volume</button>
+      <button class="chart-toggle ${toggles.equity ? 'on' : ''}" data-toggle="equity">Equity</button>
     </div>
     <svg viewBox="0 0 ${width} ${height}" class="chart-svg" role="img" aria-label="price chart">
       ${gridLines}
       ${candleSvg}
+      ${liquiditySvg}
+      ${orderBlockSvg}
       ${structureSvg}
       ${tradeSvg}
       ${axisLabels}
@@ -611,10 +684,24 @@ function renderSvgChart(data) {
       <span><i class="lg candle-up"></i> Bull candle</span>
       <span><i class="lg candle-down"></i> Bear candle</span>
       <span><i class="lg struct-up"></i> Structure</span>
+      <span><i class="lg liq-line"></i> Liquidity</span>
+      <span><i class="lg ob-band"></i> OB zone</span>
       <span><i class="lg trade-buy"></i> Trade</span>
     </div>
+    ${volumeSvg}
     ${equitySvg}
   `;
+}
+
+function bindChartToggles(view, data, state) {
+  view.querySelectorAll('.chart-toggle').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state[btn.dataset.toggle] = !state[btn.dataset.toggle];
+      data.toggles = { ...state };
+      view.innerHTML = renderSvgChart(data);
+      bindChartToggles(view, data, state);
+    });
+  });
 }
 
 function openChartPanel(initialTicker, initialInterval = '5m', initialRange = 5) {
@@ -640,6 +727,14 @@ function openChartPanel(initialTicker, initialInterval = '5m', initialRange = 5)
   const tickerEl = document.getElementById('chart-ticker');
   const intervalEl = document.getElementById('chart-interval');
   const rangeEl = document.getElementById('chart-range');
+  const state = {
+    structures: true,
+    trades: true,
+    liquidity: true,
+    orderBlocks: true,
+    volume: true,
+    equity: true,
+  };
   const run = async () => {
     const view = document.getElementById('chart-view');
     view.innerHTML = '<p class="empty-note">加载中…</p>';
@@ -651,7 +746,9 @@ function openChartPanel(initialTicker, initialInterval = '5m', initialRange = 5)
       });
       const r = await fetch(`/api/chart?${params.toString()}`);
       const d = await r.json();
+      d.toggles = { ...state };
       view.innerHTML = renderSvgChart(d);
+      bindChartToggles(view, d, state);
     } catch (e) {
       view.innerHTML = `<p class="empty-note">加载失败: ${e.message}</p>`;
     }

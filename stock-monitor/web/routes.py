@@ -243,6 +243,50 @@ def build_router(
         ]
         structures.sort(key=lambda row: row["ts"])
 
+        sweeps_high = {
+            round(float(row["price"]), 4)
+            for row in structures if row["kind"] == "liq_sweep_high"
+        }
+        sweeps_low = {
+            round(float(row["price"]), 4)
+            for row in structures if row["kind"] == "liq_sweep_low"
+        }
+        liquidity_levels = []
+        seen_liq: set[tuple[str, float]] = set()
+        for row in structures:
+            if row["kind"] not in {"swing_high", "swing_low"}:
+                continue
+            side = "high" if row["kind"] == "swing_high" else "low"
+            price_key = round(float(row["price"]), 4)
+            swept = price_key in (sweeps_high if side == "high" else sweeps_low)
+            key = (side, price_key)
+            if key in seen_liq:
+                continue
+            seen_liq.add(key)
+            liquidity_levels.append({
+                "ts": row["ts"],
+                "side": side,
+                "price": row["price"],
+                "active": not swept,
+            })
+
+        order_blocks = []
+        for row in structures:
+            if row["kind"] not in {"ob_bull", "ob_bear"}:
+                continue
+            meta = row.get("meta") or {}
+            low_p = meta.get("low")
+            high_p = meta.get("high")
+            if low_p is None or high_p is None:
+                continue
+            order_blocks.append({
+                "ts": row["ts"],
+                "kind": row["kind"],
+                "low": float(low_p),
+                "high": float(high_p),
+                "status": meta.get("status", "fresh"),
+            })
+
         trades = [
             row for row in storage.list_paper_trades(ticker=ticker, limit=1000)
             if datetime.fromisoformat(row["ts"]) >= since
@@ -260,6 +304,8 @@ def build_router(
             "range_days": range_days,
             "candles": candles,
             "structures": structures,
+            "liquidity": liquidity_levels,
+            "order_blocks": order_blocks,
             "trades": trades,
             "equity": equity,
         }

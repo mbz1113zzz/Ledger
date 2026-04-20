@@ -135,6 +135,14 @@ def test_chart_route_returns_candles_structures_and_trades(client, monkeypatch):
         ticker="NVDA", tf="5m", kind="bos_up", price=101.2,
         ts=ts, ref_id=None, meta={}
     )
+    s.insert_smc_structure(
+        ticker="NVDA", tf="5m", kind="ob_bull", price=100.5,
+        ts=ts, ref_id=None, meta={"low": 100.0, "high": 101.0, "status": "fresh"}
+    )
+    s.insert_smc_structure(
+        ticker="NVDA", tf="5m", kind="swing_high", price=103.0,
+        ts=ts, ref_id=None, meta={"kind": "swing_high"}
+    )
     s.insert_paper_trade(
         ts=ts, ticker="NVDA", side="buy", qty=10, price=101.5,
         reason="smc_bos_ob", signal_id=8,
@@ -145,5 +153,7 @@ def test_chart_route_returns_candles_structures_and_trades(client, monkeypatch):
     body = r.json()
     assert len(body["candles"]) == 2
     assert body["structures"][0]["kind"] == "bos_up"
+    assert body["order_blocks"][0]["kind"] == "ob_bull"
+    assert body["liquidity"][0]["side"] == "high"
     assert body["trades"][0]["side"] == "buy"
     assert body["equity"][0]["equity"] == 10015.0

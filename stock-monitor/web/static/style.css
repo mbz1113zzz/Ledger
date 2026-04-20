@@ -670,6 +670,9 @@ aside h2 {
   border: 1px solid var(--border);
   border-radius: 10px;
 }
+.chart-svg-sm {
+  min-height: 120px;
+}
 .chart-grid {
   stroke: color-mix(in srgb, var(--border) 75%, transparent);
   stroke-width: 1;
@@ -696,6 +699,25 @@ aside h2 {
   color: var(--text-2);
   font: 11px var(--f-mono);
 }
+.chart-toggles {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 10px;
+}
+.chart-toggle {
+  padding: 4px 8px;
+  font: 11px var(--f-mono);
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text-2);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.chart-toggle.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .chart-legend .lg {
   display: inline-block;
   width: 10px;
@@ -707,6 +729,8 @@ aside h2 {
 .chart-legend .candle-up { background: #67b87b; }
 .chart-legend .candle-down { background: #ef5350; }
 .chart-legend .struct-up { background: #42a5f5; border-radius: 50%; }
+.chart-legend .liq-line { background: #26c6da; width: 12px; height: 2px; border-radius: 0; vertical-align: 3px; }
+.chart-legend .ob-band { background: rgba(66,165,245,0.35); }
 .chart-legend .trade-buy { background: #ffb74d; clip-path: polygon(50% 0, 0 100%, 100% 100%); }
 .chart-subsection {
   margin-top: 14px;

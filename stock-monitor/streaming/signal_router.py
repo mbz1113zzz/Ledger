@@ -28,6 +28,15 @@ def _serializable_asdict(obj) -> dict:
     return d
 
 
+def _ref_meta(ref) -> dict:
+    if ref is None:
+        return {}
+    try:
+        return _serializable_asdict(ref)
+    except Exception:
+        return {}
+
+
 class SignalRouter:
     def __init__(self, storage: Storage, notifier: Notifier,
                  push_hub: PushHub | None):
@@ -59,7 +68,7 @@ class SignalRouter:
     async def on_structure(self, ev: StructureEvent, tf: str) -> None:
         self._s.insert_smc_structure(
             ticker=ev.ticker, tf=tf, kind=ev.kind, price=ev.price, ts=ev.ts,
-            ref_id=None, meta={},
+            ref_id=None, meta=_ref_meta(ev.ref),
         )
         await self._n.publish({
             "type": "structure", "ticker": ev.ticker, "tf": tf,

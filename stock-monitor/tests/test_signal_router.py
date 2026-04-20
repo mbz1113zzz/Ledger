@@ -5,7 +5,7 @@ from notifier import Notifier
 from storage import Storage
 from streaming.anomaly import AnomalySignal
 from streaming.signal_router import SignalRouter
-from smc.types import SmcSignal, StructureEvent
+from smc.types import OrderBlock, SmcSignal, StructureEvent
 
 
 def _storage():
@@ -54,11 +54,21 @@ async def test_duplicate_anomaly_in_same_minute_is_rejected():
 async def test_structure_event_persisted_to_smc_table():
     s = _storage()
     router = SignalRouter(storage=s, notifier=Notifier(), push_hub=None)
+    ref = OrderBlock(
+        ts=datetime(2026, 4, 19, 14, 25, tzinfo=timezone.utc),
+        ticker="NVDA",
+        kind="bull",
+        low=100.0,
+        high=101.0,
+        bar_idx=3,
+    )
     ev = StructureEvent(ts=datetime(2026, 4, 19, 14, 30, tzinfo=timezone.utc),
-                        ticker="NVDA", kind="bos_up", price=105.0, ref=None)
+                        ticker="NVDA", kind="ob_bull", price=100.5, ref=ref)
     await router.on_structure(ev, tf="5m")
     rows = s.query_smc_structure(ticker="NVDA")
-    assert rows[0]["kind"] == "bos_up"
+    assert rows[0]["kind"] == "ob_bull"
+    assert rows[0]["meta"]["low"] == 100.0
+    assert rows[0]["meta"]["high"] == 101.0
 
 
 async def test_smc_signal_persisted_as_event():
