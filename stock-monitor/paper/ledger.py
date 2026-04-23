@@ -21,6 +21,7 @@ class Position:
     tp: float
     reason: str
     signal_id: int | None = None
+    entry_fee: float = 0.0
     mark_price: float | None = None
 
     @property
@@ -56,6 +57,7 @@ class Ledger:
                 tp=float(row["tp"]),
                 reason=row["reason"],
                 signal_id=row["signal_id"],
+                entry_fee=float(row["entry_fee"] or 0.0),
                 mark_price=float(row["mark_price"]),
             )
 
@@ -67,6 +69,18 @@ class Ledger:
 
     def positions_value(self) -> float:
         return sum(pos.market_value() for pos in self._positions.values())
+
+    def gross_exposure(self, *, side: str | None = None) -> float:
+        total = 0.0
+        for pos in self._positions.values():
+            if side is not None and pos.side != side:
+                continue
+            px = pos.mark_price if pos.mark_price is not None else pos.entry_price
+            total += abs(pos.qty * px)
+        return total
+
+    def open_risk_amount(self) -> float:
+        return sum(pos.qty * pos.risk_per_share for pos in self._positions.values())
 
     def equity_now(self) -> float:
         return self.cash + self.positions_value()
@@ -85,17 +99,22 @@ class Ledger:
         }
 
     def open_position(
-        self, signal: SmcSignal, *, qty: int, signal_id: int | None = None
+        self,
+        signal: SmcSignal,
+        *,
+        qty: int,
+        signal_id: int | None = None,
+        fee: float = 0.0,
     ) -> Position | None:
         if qty <= 0 or signal.ticker in self._positions:
             return None
         cost = qty * signal.entry
-        if signal.side == "long" and cost > self.cash:
+        if signal.side == "long" and cost + fee > self.cash:
             return None
         if signal.side == "long":
-            self.cash -= cost
+            self.cash -= cost + fee
         else:
-            self.cash += cost
+            self.cash += cost - fee
         pos = Position(
             ticker=signal.ticker,
             side=signal.side,
@@ -106,6 +125,7 @@ class Ledger:
             tp=signal.tp,
             reason=signal.reason,
             signal_id=signal_id,
+            entry_fee=fee,
             mark_price=signal.entry,
         )
         self._positions[signal.ticker] = pos
@@ -119,6 +139,7 @@ class Ledger:
             tp=pos.tp,
             reason=pos.reason,
             signal_id=pos.signal_id,
+            entry_fee=pos.entry_fee,
             mark_price=pos.mark_price or pos.entry_price,
             updated_at=signal.ts,
         )
@@ -130,6 +151,7 @@ class Ledger:
             price=signal.entry,
             reason=signal.reason,
             signal_id=signal_id,
+            fee=fee,
         )
         self.snapshot(signal.ts)
         return pos
@@ -149,6 +171,7 @@ class Ledger:
             tp=pos.tp,
             reason=pos.reason,
             signal_id=pos.signal_id,
+            entry_fee=pos.entry_fee,
             mark_price=price,
             updated_at=ts,
         )
@@ -169,24 +192,34 @@ class Ledger:
             tp=pos.tp,
             reason=pos.reason,
             signal_id=pos.signal_id,
+            entry_fee=pos.entry_fee,
             mark_price=pos.mark_price if pos.mark_price is not None else pos.entry_price,
             updated_at=ts,
         )
         return pos
 
-    def close_position(self, ticker: str, *, price: float, ts: datetime, reason: str) -> dict | None:
+    def close_position(
+        self,
+        ticker: str,
+        *,
+        price: float,
+        ts: datetime,
+        reason: str,
+        fee: float = 0.0,
+    ) -> dict | None:
         pos = self._positions.pop(ticker, None)
         if pos is None:
             return None
         notional = pos.qty * price
         if pos.side == "long":
-            pnl = (price - pos.entry_price) * pos.qty
-            rr = ((price - pos.entry_price) / pos.risk_per_share) if pos.risk_per_share > 0 else None
-            self.cash += notional
+            gross_pnl = (price - pos.entry_price) * pos.qty
+            self.cash += notional - fee
         else:
-            pnl = (pos.entry_price - price) * pos.qty
-            rr = ((pos.entry_price - price) / pos.risk_per_share) if pos.risk_per_share > 0 else None
-            self.cash -= notional
+            gross_pnl = (pos.entry_price - price) * pos.qty
+            self.cash -= notional + fee
+        pnl = gross_pnl - pos.entry_fee - fee
+        total_risk = pos.qty * pos.risk_per_share
+        rr = (pnl / total_risk) if total_risk > 0 else None
         self._storage.delete_paper_position(ticker)
         self._storage.insert_paper_trade(
             ts=ts,
@@ -198,6 +231,7 @@ class Ledger:
             pnl=pnl,
             signal_id=pos.signal_id,
             rr=rr,
+            fee=fee,
         )
         snap = self.snapshot(ts)
         return {
@@ -209,6 +243,8 @@ class Ledger:
             "reason": reason,
             "pnl": pnl,
             "rr": rr,
+            "fee": fee,
+            "entry_fee": pos.entry_fee,
             "ts": ts.isoformat(),
             "equity": snap["equity"],
         }

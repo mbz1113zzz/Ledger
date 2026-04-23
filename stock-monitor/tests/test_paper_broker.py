@@ -35,9 +35,15 @@ async def test_on_signal_opens_position_and_records_trade():
         strategy=SmcLongStrategy(),
         prices=PriceBook(),
         max_hold_min=60,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
     )
     opened = await broker.on_smc_signal(_signal(), signal_id=7)
     assert opened is not None
+    assert opened["status"] == "queued"
+    assert broker.ledger.positions_payload() == []
+    await broker.on_tick("NVDA", 100.0, datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc))
     positions = broker.ledger.positions_payload()
     assert len(positions) == 1
     trades = storage.list_paper_trades()
@@ -52,8 +58,12 @@ async def test_take_profit_exit_records_sell_and_clears_position():
         strategy=SmcLongStrategy(),
         prices=PriceBook(),
         max_hold_min=60,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
     )
     await broker.on_smc_signal(_signal())
+    await broker.on_tick("NVDA", 100.0, datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc))
     closed = await broker.on_tick("NVDA", 102.5,
                                   datetime(2026, 4, 19, 14, 35, tzinfo=timezone.utc))
     assert len(closed) == 1
@@ -70,9 +80,13 @@ async def test_timeout_exit_closes_position_after_max_hold():
         strategy=SmcLongStrategy(),
         prices=PriceBook(),
         max_hold_min=60,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
     )
     sig = _signal()
     await broker.on_smc_signal(sig)
+    await broker.on_tick("NVDA", 100.0, sig.ts + timedelta(minutes=1))
     closed = await broker.on_tick("NVDA", 100.5, sig.ts + timedelta(minutes=61))
     assert len(closed) == 1
     assert closed[0]["reason"] == "timeout"
@@ -85,8 +99,12 @@ async def test_eod_close_flattens_open_positions():
         strategy=SmcLongStrategy(),
         prices=PriceBook(),
         max_hold_min=60,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
     )
     await broker.on_smc_signal(_signal())
+    await broker.on_tick("NVDA", 100.0, datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc))
     closed = await broker.handle_eod_close(datetime(2026, 4, 19, 19, 50, tzinfo=timezone.utc))
     assert len(closed) == 1
     assert closed[0]["reason"] == "eod"
@@ -101,8 +119,12 @@ async def test_break_even_stop_moves_to_entry_and_exits_flat():
         max_hold_min=60,
         break_even_enabled=True,
         break_even_r=1.0,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
     )
     await broker.on_smc_signal(_signal())
+    await broker.on_tick("NVDA", 100.0, datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc))
     await broker.on_tick("NVDA", 101.1, datetime(2026, 4, 19, 14, 32, tzinfo=timezone.utc))
     closed = await broker.on_tick("NVDA", 100.0, datetime(2026, 4, 19, 14, 33, tzinfo=timezone.utc))
     assert len(closed) == 1
@@ -135,9 +157,13 @@ async def test_open_and_close_publish_notifications():
     broker = PaperBroker(
         ledger=Ledger(storage), strategy=SmcLongStrategy(),
         prices=PriceBook(), max_hold_min=60,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
         notifier=notifier, push_hub=hub,
     )
     await broker.on_smc_signal(_signal())
+    await broker.on_tick("NVDA", 100.0, datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc))
     await broker.on_tick("NVDA", 102.5,
                           datetime(2026, 4, 19, 14, 35, tzinfo=timezone.utc))
     # Let scheduled publish tasks run
@@ -156,8 +182,12 @@ async def test_max_positions_gate_blocks_additional_opens():
     broker = PaperBroker(
         ledger=Ledger(storage), strategy=SmcLongStrategy(),
         prices=PriceBook(), max_hold_min=60, max_positions=1,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
     )
     await broker.on_smc_signal(_signal())
+    await broker.on_tick("NVDA", 100.0, datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc))
     sig2 = SmcSignal(
         ts=datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc),
         ticker="TSLA", entry=200.0, sl=198.0, tp=204.0, reason="smc_bos_ob",
@@ -178,6 +208,9 @@ async def test_day_drawdown_circuit_breaker_halts_new_entries():
     broker = PaperBroker(
         ledger=Ledger(storage), strategy=SmcLongStrategy(),
         prices=PriceBook(), max_hold_min=60, max_day_drawdown_pct=0.03,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
     )
     opened = await broker.on_smc_signal(_signal())
     assert opened is None
@@ -190,6 +223,9 @@ async def test_short_signal_opens_and_takes_profit():
         strategy=SmcLongStrategy(),
         prices=PriceBook(),
         max_hold_min=60,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
     )
     sig = SmcSignal(
         ts=datetime(2026, 4, 19, 14, 30, tzinfo=timezone.utc),
@@ -203,7 +239,84 @@ async def test_short_signal_opens_and_takes_profit():
     opened = await broker.on_smc_signal(sig, signal_id=9)
     assert opened is not None
     assert opened["side"] == "short"
+    await broker.on_tick("TSLA", 100.0, datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc))
     closed = await broker.on_tick("TSLA", 97.8, datetime(2026, 4, 19, 14, 35, tzinfo=timezone.utc))
     assert len(closed) == 1
     assert closed[0]["reason"] == "tp"
     assert closed[0]["pnl"] > 0
+
+
+async def test_slippage_and_fees_reduce_net_pnl():
+    storage = _storage()
+    broker = PaperBroker(
+        ledger=Ledger(storage),
+        strategy=SmcLongStrategy(),
+        prices=PriceBook(),
+        max_hold_min=60,
+        slippage_bps=10.0,
+        commission_per_share=0.01,
+        commission_min=0.0,
+    )
+    await broker.on_smc_signal(_signal())
+    await broker.on_tick("NVDA", 100.0, datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc))
+    positions = broker.ledger.positions_payload()
+    assert positions[0]["entry_price"] > 100.0
+    closed = await broker.on_tick("NVDA", 102.0, datetime(2026, 4, 19, 14, 35, tzinfo=timezone.utc))
+    assert len(closed) == 1
+    assert closed[0]["pnl"] < 40.0
+    trades = storage.list_paper_trades(limit=10)
+    assert trades[0]["fee"] > 0
+    assert trades[1]["fee"] > 0
+
+
+async def test_open_risk_cap_blocks_second_correlated_entry():
+    storage = _storage()
+    broker = PaperBroker(
+        ledger=Ledger(storage),
+        strategy=SmcLongStrategy(),
+        prices=PriceBook(),
+        max_hold_min=60,
+        max_open_risk_pct=0.003,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
+    )
+    await broker.on_smc_signal(_signal())
+    await broker.on_tick("NVDA", 100.0, datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc))
+    sig2 = SmcSignal(
+        ts=datetime(2026, 4, 19, 14, 32, tzinfo=timezone.utc),
+        ticker="TSLA", entry=100.0, sl=99.0, tp=102.0, reason="smc_bos_ob",
+    )
+    queued = await broker.on_smc_signal(sig2)
+    assert queued is not None
+    await broker.on_tick("TSLA", 100.0, datetime(2026, 4, 19, 14, 33, tzinfo=timezone.utc))
+    assert broker.ledger.position_for("TSLA") is None
+
+
+async def test_gross_exposure_cap_counts_both_long_and_short_exposure():
+    storage = _storage()
+    broker = PaperBroker(
+        ledger=Ledger(storage),
+        strategy=SmcLongStrategy(),
+        prices=PriceBook(),
+        max_hold_min=60,
+        max_gross_exposure_pct=0.30,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
+    )
+    await broker.on_smc_signal(_signal())
+    await broker.on_tick("NVDA", 100.0, datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc))
+    short_sig = SmcSignal(
+        ts=datetime(2026, 4, 19, 14, 32, tzinfo=timezone.utc),
+        ticker="TSLA",
+        entry=100.0,
+        sl=101.0,
+        tp=98.0,
+        side="short",
+        reason="smc_bos_ob_short",
+    )
+    queued = await broker.on_smc_signal(short_sig)
+    assert queued is not None
+    await broker.on_tick("TSLA", 100.0, datetime(2026, 4, 19, 14, 33, tzinfo=timezone.utc))
+    assert broker.ledger.position_for("TSLA") is None

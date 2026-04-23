@@ -24,6 +24,7 @@ def test_paper_position_trade_and_equity_roundtrip():
         tp=102.0,
         reason="smc_bos_ob",
         signal_id=3,
+        entry_fee=1.25,
         mark_price=101.0,
         updated_at=ts,
     )
@@ -35,8 +36,11 @@ def test_paper_position_trade_and_equity_roundtrip():
         price=100.0,
         reason="smc_bos_ob",
         signal_id=3,
+        fee=1.25,
     )
     s.record_paper_equity(ts=ts, cash=9000.0, positions_value=1010.0, equity=10010.0)
     assert s.list_paper_positions()[0]["ticker"] == "NVDA"
+    assert s.list_paper_positions()[0]["entry_fee"] == 1.25
     assert s.list_paper_trades()[0]["reason"] == "smc_bos_ob"
+    assert s.list_paper_trades()[0]["fee"] == 1.25
     assert s.last_paper_equity()["equity"] == 10010.0

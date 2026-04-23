@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
@@ -16,6 +17,12 @@ _ET = ZoneInfo("America/New_York")
 _PUSH_TIMEOUT_SEC = 5.0
 
 
+@dataclass(slots=True)
+class PendingEntry:
+    signal: SmcSignal
+    signal_id: int | None = None
+
+
 class PaperBroker:
     def __init__(
         self,
@@ -28,6 +35,11 @@ class PaperBroker:
         break_even_r: float = 1.0,
         max_positions: int = 5,
         max_day_drawdown_pct: float = 0.03,
+        max_gross_exposure_pct: float = 0.50,
+        max_open_risk_pct: float = 0.03,
+        slippage_bps: float = 5.0,
+        commission_per_share: float = 0.005,
+        commission_min: float = 1.0,
         notifier=None,
         push_hub=None,
     ):
@@ -39,6 +51,11 @@ class PaperBroker:
         self._break_even_r = break_even_r
         self._max_positions = max(1, int(max_positions))
         self._max_day_drawdown = abs(float(max_day_drawdown_pct))
+        self._max_gross_exposure_pct = abs(float(max_gross_exposure_pct))
+        self._max_open_risk_pct = abs(float(max_open_risk_pct))
+        self._slippage_bps = abs(float(slippage_bps))
+        self._commission_per_share = max(0.0, float(commission_per_share))
+        self._commission_min = max(0.0, float(commission_min))
         self._notifier = notifier
         self._push_hub = push_hub
         # When circuit breaker trips we stop opening new positions for the day
@@ -47,10 +64,19 @@ class PaperBroker:
         # Strong refs to fire-and-forget notification tasks so the GC doesn't
         # eat them mid-flight and spam "Task was destroyed" warnings.
         self._pending_tasks: set[asyncio.Task] = set()
+        self._pending_entries: dict[str, PendingEntry] = {}
 
     @property
     def ledger(self) -> Ledger:
         return self._ledger
+
+    def has_open_positions(self) -> bool:
+        return bool(self._ledger.positions())
+
+    def cancel_pending_entries(self) -> int:
+        count = len(self._pending_entries)
+        self._pending_entries.clear()
+        return count
 
     # ----- risk gates -----
 
@@ -79,6 +105,31 @@ class PaperBroker:
                           f"-{self._max_day_drawdown*100:.2f}% cap"))
             return "day drawdown cap"
         return None
+
+    def _check_portfolio_limits(self, signal: SmcSignal, qty: int) -> str | None:
+        equity = self._ledger.equity_now()
+        if equity <= 0:
+            return "non_positive_equity"
+        projected_open_risk = self._ledger.open_risk_amount() + qty * signal.risk_per_share()
+        if projected_open_risk > equity * self._max_open_risk_pct:
+            return "open_risk_cap"
+        projected_gross_exposure = self._ledger.gross_exposure() + qty * signal.entry
+        if projected_gross_exposure > equity * self._max_gross_exposure_pct:
+            return "gross_exposure_cap"
+        return None
+
+    def _apply_slippage(self, *, price: float, side: str, action: str) -> float:
+        if price <= 0 or self._slippage_bps <= 0:
+            return price
+        slip = price * (self._slippage_bps / 10_000.0)
+        if action == "entry":
+            return price + slip if side == "long" else max(0.0, price - slip)
+        return max(0.0, price - slip) if side == "long" else price + slip
+
+    def _commission(self, qty: int) -> float:
+        if qty <= 0 or self._commission_per_share <= 0:
+            return 0.0
+        return max(self._commission_min, qty * self._commission_per_share)
 
     # ----- event emission -----
 
@@ -149,17 +200,52 @@ class PaperBroker:
     async def on_smc_signal(self, signal: SmcSignal, *, signal_id: int | None = None) -> dict | None:
         if self._ledger.position_for(signal.ticker) is not None:
             return None
+        if signal.ticker in self._pending_entries:
+            return None
         blocked = self._check_risk_gate(signal.ts)
         if blocked is not None:
             log.info("paper signal for %s blocked: %s", signal.ticker, blocked)
             return None
+        self._pending_entries[signal.ticker] = PendingEntry(signal=signal, signal_id=signal_id)
+        return {
+            "ticker": signal.ticker,
+            "status": "queued",
+            "side": signal.side,
+            "reason": signal.reason,
+            "signal_id": signal_id,
+        }
+
+    def _fill_pending_entry(self, ticker: str, price: float, ts: datetime) -> dict | None:
+        pending = self._pending_entries.get(ticker)
+        if pending is None:
+            return None
+        signal = pending.signal
+        if ts <= signal.ts or self._ledger.position_for(ticker) is not None:
+            return None
+        self._pending_entries.pop(ticker, None)
+        blocked = self._check_risk_gate(ts)
+        if blocked is not None:
+            log.info("paper pending entry for %s canceled: %s", ticker, blocked)
+            return None
+        fill_price = self._apply_slippage(price=price, side=signal.side, action="entry")
+        filled_signal = replace(signal, ts=ts, entry=fill_price)
         qty = self._strategy.size_for_signal(
-            signal, equity=self._ledger.equity_now(), cash=self._ledger.cash
+            filled_signal, equity=self._ledger.equity_now(), cash=self._ledger.cash
         )
         if qty <= 0:
             return None
-        self._prices.update(signal.ticker, signal.entry, signal.ts)
-        pos = self._ledger.open_position(signal, qty=qty, signal_id=signal_id)
+        blocked = self._check_portfolio_limits(filled_signal, qty)
+        if blocked is not None:
+            log.info("paper pending entry for %s canceled: %s", ticker, blocked)
+            return None
+        fee = self._commission(qty)
+        self._prices.update(signal.ticker, fill_price, ts)
+        pos = self._ledger.open_position(
+            filled_signal,
+            qty=qty,
+            signal_id=pending.signal_id,
+            fee=fee,
+        )
         if pos is None:
             return None
         result = {
@@ -170,11 +256,12 @@ class PaperBroker:
             "reason": pos.reason,
             "sl": pos.sl,
             "tp": pos.tp,
+            "fee": fee,
         }
         payload = {
             "type": "paper",
             "action": "open",
-            "ts": signal.ts.isoformat(),
+            "ts": ts.isoformat(),
             **result,
         }
         self._emit_event(payload, push_text=self._fmt_open(result))
@@ -191,6 +278,9 @@ class PaperBroker:
 
     async def on_tick(self, ticker: str, price: float, ts: datetime) -> list[dict]:
         self._prices.update(ticker, price, ts)
+        opened = self._fill_pending_entry(ticker, price, ts)
+        if opened is not None:
+            return []
         pos = self._ledger.mark_price(ticker, price, ts)
         if pos is None:
             return []
@@ -206,19 +296,49 @@ class PaperBroker:
         if pos.side == "long":
             if price <= pos.sl:
                 reason = "be" if pos.sl >= pos.entry_price else "sl"
-                closed = self._ledger.close_position(ticker, price=price, ts=ts, reason=reason)
+                closed = self._ledger.close_position(
+                    ticker,
+                    price=self._apply_slippage(price=price, side=pos.side, action="exit"),
+                    ts=ts,
+                    reason=reason,
+                    fee=self._commission(pos.qty),
+                )
             elif price >= pos.tp:
-                closed = self._ledger.close_position(ticker, price=price, ts=ts, reason="tp")
+                closed = self._ledger.close_position(
+                    ticker,
+                    price=self._apply_slippage(price=price, side=pos.side, action="exit"),
+                    ts=ts,
+                    reason="tp",
+                    fee=self._commission(pos.qty),
+                )
         else:
             if price >= pos.sl:
                 reason = "be" if pos.sl <= pos.entry_price else "sl"
-                closed = self._ledger.close_position(ticker, price=price, ts=ts, reason=reason)
+                closed = self._ledger.close_position(
+                    ticker,
+                    price=self._apply_slippage(price=price, side=pos.side, action="exit"),
+                    ts=ts,
+                    reason=reason,
+                    fee=self._commission(pos.qty),
+                )
             elif price <= pos.tp:
-                closed = self._ledger.close_position(ticker, price=price, ts=ts, reason="tp")
+                closed = self._ledger.close_position(
+                    ticker,
+                    price=self._apply_slippage(price=price, side=pos.side, action="exit"),
+                    ts=ts,
+                    reason="tp",
+                    fee=self._commission(pos.qty),
+                )
         if closed is None:
             hold_sec = (ts - pos.entry_ts).total_seconds()
             if hold_sec >= self._max_hold_sec:
-                closed = self._ledger.close_position(ticker, price=price, ts=ts, reason="timeout")
+                closed = self._ledger.close_position(
+                    ticker,
+                    price=self._apply_slippage(price=price, side=pos.side, action="exit"),
+                    ts=ts,
+                    reason="timeout",
+                    fee=self._commission(pos.qty),
+                )
         if closed is not None:
             self._emit_close(closed)
             return [closed]
@@ -228,11 +348,18 @@ class PaperBroker:
     async def handle_eod_close(self, ts: datetime | None = None) -> list[dict]:
         ts = ts or datetime.now(timezone.utc)
         out = []
+        self._pending_entries.clear()
         for pos in list(self._ledger.positions()):
             price = self._prices.latest(pos.ticker)
             if price is None:
                 price = pos.mark_price if pos.mark_price is not None else pos.entry_price
-            closed = self._ledger.close_position(pos.ticker, price=price, ts=ts, reason="eod")
+            closed = self._ledger.close_position(
+                pos.ticker,
+                price=self._apply_slippage(price=price, side=pos.side, action="exit"),
+                ts=ts,
+                reason="eod",
+                fee=self._commission(pos.qty),
+            )
             if closed is not None:
                 self._emit_close(closed)
                 out.append(closed)

@@ -48,7 +48,8 @@ CREATE TABLE IF NOT EXISTS paper_trades (
     reason TEXT NOT NULL,
     pnl REAL,
     signal_id INTEGER,
-    rr REAL
+    rr REAL,
+    fee REAL NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_paper_trades_ts ON paper_trades(ts DESC);
 CREATE INDEX IF NOT EXISTS idx_paper_trades_ticker_ts ON paper_trades(ticker, ts DESC);
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     tp REAL NOT NULL,
     reason TEXT NOT NULL,
     signal_id INTEGER,
+    entry_fee REAL NOT NULL DEFAULT 0,
     mark_price REAL NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
@@ -116,6 +118,17 @@ class Storage:
         if pos_cols and "side" not in pos_cols:
             self._conn.execute(
                 "ALTER TABLE paper_positions ADD COLUMN side TEXT NOT NULL DEFAULT 'long'"
+            )
+        if pos_cols and "entry_fee" not in pos_cols:
+            self._conn.execute(
+                "ALTER TABLE paper_positions ADD COLUMN entry_fee REAL NOT NULL DEFAULT 0"
+            )
+        trade_cols = {
+            r["name"] for r in self._conn.execute("PRAGMA table_info(paper_trades)").fetchall()
+        }
+        if trade_cols and "fee" not in trade_cols:
+            self._conn.execute(
+                "ALTER TABLE paper_trades ADD COLUMN fee REAL NOT NULL DEFAULT 0"
             )
         self._conn.commit()
 
@@ -254,11 +267,12 @@ class Storage:
         signal_id: int | None,
         mark_price: float,
         updated_at: datetime,
+        entry_fee: float = 0.0,
     ) -> None:
         self._conn.execute(
             """INSERT INTO paper_positions
-               (ticker, side, qty, entry_price, entry_ts, sl, tp, reason, signal_id, mark_price, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+               (ticker, side, qty, entry_price, entry_ts, sl, tp, reason, signal_id, entry_fee, mark_price, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                ON CONFLICT(ticker) DO UPDATE SET
                  side=excluded.side,
                  qty=excluded.qty,
@@ -268,6 +282,7 @@ class Storage:
                  tp=excluded.tp,
                  reason=excluded.reason,
                  signal_id=excluded.signal_id,
+                 entry_fee=excluded.entry_fee,
                  mark_price=excluded.mark_price,
                  updated_at=excluded.updated_at
             """,
@@ -281,6 +296,7 @@ class Storage:
                 tp,
                 reason,
                 signal_id,
+                entry_fee,
                 mark_price,
                 updated_at.isoformat(),
             ),
@@ -313,11 +329,12 @@ class Storage:
         pnl: float | None = None,
         signal_id: int | None = None,
         rr: float | None = None,
+        fee: float = 0.0,
     ) -> int:
         cur = self._conn.execute(
             """INSERT INTO paper_trades
-               (ts, ticker, side, qty, price, reason, pnl, signal_id, rr)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               (ts, ticker, side, qty, price, reason, pnl, signal_id, rr, fee)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 ts.isoformat(),
                 ticker,
@@ -328,6 +345,7 @@ class Storage:
                 pnl,
                 signal_id,
                 rr,
+                fee,
             ),
         )
         self._conn.commit()

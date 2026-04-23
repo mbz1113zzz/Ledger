@@ -9,6 +9,7 @@ from pushers import PushHub
 from storage import Storage
 
 ET = ZoneInfo("America/New_York")
+MIN_BEST_SETUP_CLOSED = 5
 
 
 @dataclass(slots=True)
@@ -92,7 +93,15 @@ def build_daily_review(
             closed_rows.append({"entry": entry, "exit": row})
 
     signal_stats: dict[str, dict[str, float]] = defaultdict(
-        lambda: {"signals": 0, "entries": 0, "wins": 0, "rr_sum": 0.0, "rr_n": 0, "pnl_sum": 0.0}
+        lambda: {
+            "signals": 0,
+            "entries": 0,
+            "closed": 0,
+            "wins": 0,
+            "rr_sum": 0.0,
+            "rr_n": 0,
+            "pnl_sum": 0.0,
+        }
     )
     for row in trades:
         if row["reason"].startswith("smc_"):
@@ -108,6 +117,7 @@ def build_daily_review(
             continue
         setup = entry["reason"]
         if setup.startswith("smc_"):
+            signal_stats[setup]["closed"] += 1
             if (exit_row["pnl"] or 0) > 0:
                 signal_stats[setup]["wins"] += 1
             signal_stats[setup]["pnl_sum"] += float(exit_row["pnl"] or 0.0)
@@ -183,18 +193,28 @@ def build_daily_review(
     if closed_rows:
         timeouts = sum(1 for row in closed_rows if row["exit"]["reason"] == "timeout")
         best_setup = None
-        best_win_rate = -1.0
+        best_score = None
         for reason, stats in signal_stats.items():
-            if stats["entries"] == 0:
+            if stats["closed"] < MIN_BEST_SETUP_CLOSED or stats["entries"] == 0:
                 continue
-            rate = stats["wins"] / stats["entries"]
-            if rate > best_win_rate:
-                best_setup = reason
-                best_win_rate = rate
-        if best_setup is not None:
-            lines.append(
-                f"- {best_setup} 当前胜率最高，为 {best_win_rate * 100:.0f}%（样本 {int(signal_stats[best_setup]['entries'])}）。"
+            avg_rr = (stats["rr_sum"] / stats["rr_n"]) if stats["rr_n"] else 0.0
+            score = (
+                stats["wins"] / stats["closed"],
+                avg_rr,
+                stats["pnl_sum"],
             )
+            if best_score is None or score > best_score:
+                best_setup = reason
+                best_score = score
+        if best_setup is not None:
+            best_stats = signal_stats[best_setup]
+            win_rate = best_stats["wins"] / best_stats["closed"] * 100
+            lines.append(
+                f"- {best_setup} 在达到最小样本 {MIN_BEST_SETUP_CLOSED} 笔后表现最佳："
+                f" 胜率 {win_rate:.0f}%（已平仓 {int(best_stats['closed'])} 笔）。"
+            )
+        else:
+            lines.append(f"- 当前没有任何 setup 达到最小样本 {MIN_BEST_SETUP_CLOSED} 笔，暂不评选最佳 setup。")
         lines.append(f"- timeout 出场 {timeouts} 次。")
     else:
         lines.append("- 当前还没有形成可复盘的已平仓样本。")
