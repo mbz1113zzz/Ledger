@@ -107,3 +107,15 @@ def test_handle_bar_accepts_open_instead_of_open_():
     client._handle_bar("NVDA", [bar], True)
     assert len(got) == 1
     assert got[0][1]["o"] == 10.0
+
+
+def test_snapshot_reports_connection_telemetry():
+    fake_ib = MagicMock()
+    fake_ib.isConnected = MagicMock(return_value=True)
+    with patch("sources.ibkr_realtime.IB", return_value=fake_ib):
+        client = IbkrClient(host="127.0.0.1", port=7497, client_id=42)
+    client._tick_handles = {"NVDA": object(), "TSLA": object()}
+    snap = client.snapshot()
+    assert snap["connected"] is True
+    assert snap["active_tickers"] == ["NVDA", "TSLA"]
+    assert snap["client_id"] == 42

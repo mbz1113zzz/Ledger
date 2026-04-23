@@ -54,6 +54,14 @@ def test_smc_structure_returns_recent_events(client):
     assert body["events"][0]["kind"] == "bos_up"
 
 
+def test_index_page_includes_execution_controls(client):
+    r = client.get("/")
+    assert r.status_code == 200
+    text = r.text
+    assert "btn-execution-readiness" in text
+    assert "exec-mode-dry" in text
+
+
 def test_paper_routes_return_positions_trades_and_equity(client):
     import app as am
 
@@ -157,3 +165,36 @@ def test_chart_route_returns_candles_structures_and_trades(client, monkeypatch):
     assert body["liquidity"][0]["side"] == "high"
     assert body["trades"][0]["side"] == "buy"
     assert body["equity"][0]["equity"] == 10015.0
+
+
+def test_execution_mode_route_returns_current_state(client):
+    r = client.get("/api/execution-mode")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] in {"paper", "dry_live", "live"}
+    assert "readiness" in body
+
+
+def test_execution_mode_can_switch_to_dry_live(client):
+    r = client.post("/api/execution-mode", json={"mode": "dry_live"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["mode"] == "dry_live"
+
+
+def test_execution_mode_blocks_live_when_not_ready(client):
+    r = client.post("/api/execution-mode", json={"mode": "live"})
+    assert r.status_code == 409
+    body = r.json()
+    assert body["detail"]["error"] == "live mode is locked"
+
+
+def test_health_route_reports_timeout_status(client):
+    import app as am
+
+    am.app.state.sec_source._health.record_timeout(duration_ms=123.0)
+    r = client.get("/api/health")
+    assert r.status_code == 200
+    body = r.json()
+    sec = next(item for item in body["sources"] if item["name"] == "sec_edgar")
+    assert sec["status"] == "timeout"

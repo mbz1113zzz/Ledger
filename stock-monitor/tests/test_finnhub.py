@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from sources.finnhub import FinnhubSource
+from sources.health import SourceHealth
 
 
 NEWS_RESPONSE = [
@@ -117,3 +118,35 @@ async def test_earnings_without_hour_still_parses():
     earnings = [e for e in events if e.event_type == "earnings"]
     assert len(earnings) == 1
     assert earnings[0].title.strip().endswith("2026-05-08")
+
+
+@pytest.mark.asyncio
+async def test_disabled_health_short_circuits_fetch():
+    src = FinnhubSource(api_key="fake")
+    for _ in range(SourceHealth.THRESHOLD):
+        src._news_health.record_http_error(429)
+        src._earnings_health.record_http_error(429)
+    with patch.object(src, "_get", new=AsyncMock(side_effect=AssertionError("should not call"))):
+        events = await src.fetch(["EOSE"])
+    assert events == []
+
+
+@pytest.mark.asyncio
+async def test_news_disable_does_not_block_earnings_fetch():
+    src = FinnhubSource(api_key="fake")
+    for _ in range(SourceHealth.THRESHOLD):
+        src._news_health.record_http_error(403)
+
+    paths = []
+
+    async def side_effect(path, params):
+        paths.append(path)
+        if path == "/calendar/earnings":
+            return EARNINGS_RESPONSE
+        return []
+
+    with patch.object(src, "_get", new=AsyncMock(side_effect=side_effect)):
+        events = await src.fetch(["EOSE"])
+    earnings = [e for e in events if e.event_type == "earnings"]
+    assert len(earnings) == 1
+    assert paths == ["/calendar/earnings"]

@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 import config
 from notifier import Notifier
 from paper.broker import PaperBroker
+from paper.execution import ExecutionModeController
 from paper.ledger import Ledger
 from paper.pricing import PriceBook
 from paper.strategy import SmcLongStrategy
@@ -52,6 +53,13 @@ async def lifespan(app: FastAPI):
     )
     app.state.scheduler = scheduler
     app.state.startup_sync_task = None
+    app.state.startup_sync_meta = {
+        "started_at": None,
+        "finished_at": None,
+        "duration_ms": None,
+        "status": "idle",
+        "error": None,
+    }
 
     watchlist: WatchlistManager = app.state.watchlist
     runner = build_runner_if_enabled(
@@ -69,11 +77,35 @@ async def lifespan(app: FastAPI):
 
     async def initial_sync():
         sec_source: SecEdgarSource = app.state.sec_source
+        t0 = datetime.now(timezone.utc)
+        app.state.startup_sync_meta = {
+            "started_at": t0.isoformat(),
+            "finished_at": None,
+            "duration_ms": None,
+            "status": "running",
+            "error": None,
+        }
         try:
             await sec_source.load_ticker_map()
             await pipeline.run_once()
             await price_pipeline.run_once()
+            done = datetime.now(timezone.utc)
+            app.state.startup_sync_meta = {
+                "started_at": t0.isoformat(),
+                "finished_at": done.isoformat(),
+                "duration_ms": round((done - t0).total_seconds() * 1000, 2),
+                "status": "ok",
+                "error": None,
+            }
         except Exception as e:
+            done = datetime.now(timezone.utc)
+            app.state.startup_sync_meta = {
+                "started_at": t0.isoformat(),
+                "finished_at": done.isoformat(),
+                "duration_ms": round((done - t0).total_seconds() * 1000, 2),
+                "status": "error",
+                "error": str(e),
+            }
             log.exception("initial pipeline run failed: %s", e)
 
     app.state.startup_sync_task = asyncio.create_task(initial_sync())
@@ -119,9 +151,24 @@ def create_app() -> FastAPI:
         break_even_r=config.PAPER_BREAK_EVEN_R,
         max_positions=config.PAPER_MAX_POSITIONS,
         max_day_drawdown_pct=config.PAPER_MAX_DAY_DRAWDOWN_PCT,
+        max_gross_exposure_pct=config.PAPER_MAX_GROSS_EXPOSURE_PCT,
+        max_open_risk_pct=config.PAPER_MAX_OPEN_RISK_PCT,
+        slippage_bps=config.PAPER_SLIPPAGE_BPS,
+        commission_per_share=config.PAPER_COMMISSION_PER_SHARE,
+        commission_min=config.PAPER_COMMISSION_MIN,
         notifier=notifier,
         push_hub=push_hub,
     )
+    execution = ExecutionModeController(
+        storage=storage,
+        initial_mode=config.EXECUTION_MODE,
+        live_trading_enabled=config.LIVE_TRADING_ENABLED,
+        live_execution_available=config.LIVE_EXECUTION_IMPLEMENTED,
+        min_closed_trades=config.LIVE_READINESS_MIN_CLOSED_TRADES,
+        min_win_rate_pct=config.LIVE_READINESS_MIN_WIN_RATE_PCT,
+        min_avg_rr=config.LIVE_READINESS_MIN_AVG_RR,
+    )
+    notifier._execution_controller = execution
 
     app = FastAPI(title="Stock Event Monitor", lifespan=lifespan)
     app.state.storage = storage
@@ -132,8 +179,16 @@ def create_app() -> FastAPI:
     app.state.price_pipeline = price_pipeline
     app.state.push_hub = push_hub
     app.state.paper_broker = paper_broker
+    app.state.execution = execution
     app.state.streaming_runner = None
     app.state.startup_sync_task = None
+    app.state.startup_sync_meta = {
+        "started_at": None,
+        "finished_at": None,
+        "duration_ms": None,
+        "status": "idle",
+        "error": None,
+    }
 
     app.mount("/static", StaticFiles(directory=Path(__file__).parent / "web" / "static"), name="static")
     app.include_router(

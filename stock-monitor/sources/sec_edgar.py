@@ -1,4 +1,5 @@
 import logging
+import time as time_module
 from datetime import datetime, time, timezone
 from typing import Any
 
@@ -6,6 +7,7 @@ import httpx
 
 from config import SEC_USER_AGENT
 from sources.base import Event, Source
+from sources.health import SourceHealth
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +20,7 @@ class SecEdgarSource(Source):
     def __init__(self):
         self._ticker_to_cik: dict[str, str] = {}
         self._client: httpx.AsyncClient | None = None
+        self._health = SourceHealth(self.name)
 
     def _get_client(self) -> httpx.AsyncClient:
         if self._client is None or self._client.is_closed:
@@ -38,11 +41,32 @@ class SecEdgarSource(Source):
         return resp.json()
 
     async def load_ticker_map(self) -> None:
+        if self._health.disabled:
+            return
+        t0 = time_module.perf_counter()
         try:
             data = await self._get(TICKERS_URL)
-        except Exception as e:
+        except httpx.TimeoutException as e:
+            self._health.record_timeout(
+                duration_ms=(time_module.perf_counter() - t0) * 1000,
+            )
+            log.error("SEC ticker map load timed out: %s", e)
+            return
+        except httpx.HTTPStatusError as e:
+            self._health.record_http_error(
+                e.response.status_code,
+                duration_ms=(time_module.perf_counter() - t0) * 1000,
+            )
             log.error("failed to load SEC ticker map: %s", e)
             return
+        except Exception as e:
+            self._health.record_error(
+                reason="upstream_error",
+                duration_ms=(time_module.perf_counter() - t0) * 1000,
+            )
+            log.error("failed to load SEC ticker map: %s", e)
+            return
+        self._health.record_success(duration_ms=(time_module.perf_counter() - t0) * 1000)
         for entry in (data or {}).values():
             ticker = entry.get("ticker", "").upper()
             cik = entry.get("cik_str")
@@ -50,15 +74,38 @@ class SecEdgarSource(Source):
                 self._ticker_to_cik[ticker] = str(cik).zfill(10)
 
     async def fetch(self, tickers: list[str]) -> list[Event]:
+        if self._health.disabled:
+            return []
         events: list[Event] = []
         for ticker in tickers:
             cik = self._ticker_to_cik.get(ticker.upper())
             if not cik:
                 log.debug("no CIK for ticker %s", ticker)
                 continue
+            t0 = time_module.perf_counter()
             try:
                 data = await self._get(f"https://data.sec.gov/submissions/CIK{cik}.json")
+                self._health.record_success(duration_ms=(time_module.perf_counter() - t0) * 1000)
+            except httpx.TimeoutException as e:
+                self._health.record_timeout(
+                    duration_ms=(time_module.perf_counter() - t0) * 1000,
+                )
+                log.warning("sec fetch timed out for %s: %s", ticker, e)
+                continue
+            except httpx.HTTPStatusError as e:
+                self._health.record_http_error(
+                    e.response.status_code,
+                    duration_ms=(time_module.perf_counter() - t0) * 1000,
+                )
+                if self._health.disabled:
+                    return events
+                log.warning("sec fetch failed for %s: %s", ticker, e)
+                continue
             except Exception as e:
+                self._health.record_error(
+                    reason="upstream_error",
+                    duration_ms=(time_module.perf_counter() - t0) * 1000,
+                )
                 log.warning("sec fetch failed for %s: %s", ticker, e)
                 continue
             events.extend(self._parse_filings(data, ticker, cik))

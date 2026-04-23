@@ -24,6 +24,10 @@ class TickerPayload(BaseModel):
     ticker: str
 
 
+class ExecutionModePayload(BaseModel):
+    mode: str
+
+
 STATIC_DIR = Path(__file__).parent / "static"
 
 
@@ -100,7 +104,7 @@ def build_router(
             if h is not None:
                 if h.disabled:
                     return h.reason or "disabled"
-                if h.reason and h.last_status is not None:
+                if h.reason:
                     return h.reason
             return "ok"
 
@@ -137,6 +141,67 @@ def build_router(
                 and not task.done()
             ),
         }
+
+    @router.get("/api/diagnostics")
+    async def diagnostics(request: Request):
+        def src_row(src, group: str):
+            health = getattr(src, "_health", None)
+            snap = health.snapshot() if health is not None else {}
+            return {
+                "name": src.name,
+                "group": group,
+                **snap,
+            }
+
+        runner = getattr(request.app.state, "streaming_runner", None)
+        client = getattr(runner, "_client", None) if runner is not None else None
+        ibkr = client.snapshot() if client is not None and hasattr(client, "snapshot") else None
+        startup_meta = getattr(request.app.state, "startup_sync_meta", None) or {}
+        startup_task = getattr(request.app.state, "startup_sync_task", None)
+        execution = getattr(request.app.state, "execution", None)
+
+        return {
+            "startup": {
+                **startup_meta,
+                "running": bool(startup_task is not None and not startup_task.done()),
+            },
+            "news_pipeline": {
+                "last_run_at": pipeline.last_run_at.isoformat() if pipeline.last_run_at else None,
+                "last_run_inserted": pipeline.last_run_inserted,
+                "ticker_count": len(watchlist.tickers()),
+                "tickers": watchlist.tickers(),
+            },
+            "price_pipeline": {
+                "last_run_at": price_pipeline.last_run_at.isoformat() if price_pipeline.last_run_at else None,
+                "last_run_inserted": price_pipeline.last_run_inserted,
+            },
+            "sources": [
+                *(src_row(src, "news") for src in pipeline.sources),
+                *(src_row(src, "price") for src in price_pipeline.sources),
+            ],
+            "ibkr": ibkr,
+            "execution": execution.snapshot() if execution is not None else None,
+        }
+
+    @router.get("/api/execution-mode")
+    async def execution_mode(request: Request):
+        execution = getattr(request.app.state, "execution", None)
+        if execution is None:
+            raise HTTPException(status_code=503, detail="execution controller unavailable")
+        return execution.snapshot()
+
+    @router.post("/api/execution-mode")
+    async def set_execution_mode(payload: ExecutionModePayload, request: Request):
+        execution = getattr(request.app.state, "execution", None)
+        if execution is None:
+            raise HTTPException(status_code=503, detail="execution controller unavailable")
+        ok, body = execution.set_mode(payload.mode)
+        if ok:
+            if payload.mode != "paper":
+                canceled = paper_broker.cancel_pending_entries()
+                body["pending_entries_canceled"] = canceled
+            return body
+        raise HTTPException(status_code=409, detail=body)
 
     @router.post("/api/refresh")
     async def refresh():

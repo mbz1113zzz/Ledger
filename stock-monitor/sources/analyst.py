@@ -1,4 +1,5 @@
 import logging
+import time as time_module
 from datetime import datetime, time, timedelta, timezone
 from typing import Any
 
@@ -48,21 +49,34 @@ class AnalystSource(Source):
         events: list[Event] = []
         async with httpx.AsyncClient(timeout=15.0) as client:
             for ticker in tickers:
+                t0 = time_module.perf_counter()
                 try:
                     data = await self._get(
                         client,
                         "/stock/upgrade-downgrade",
                         {"symbol": ticker, "from": since, "to": today.isoformat()},
                     )
-                    self._health.record_success()
+                    self._health.record_success(duration_ms=(time_module.perf_counter() - t0) * 1000)
+                except httpx.TimeoutException as e:
+                    self._health.record_timeout(
+                        duration_ms=(time_module.perf_counter() - t0) * 1000,
+                    )
+                    log.warning("analyst fetch timed out for %s: %s", ticker, e)
+                    continue
                 except httpx.HTTPStatusError as e:
-                    if 400 <= e.response.status_code < 500:
-                        self._health.record_4xx(e.response.status_code)
-                        if self._health.disabled:
-                            return []
+                    self._health.record_http_error(
+                        e.response.status_code,
+                        duration_ms=(time_module.perf_counter() - t0) * 1000,
+                    )
+                    if self._health.disabled:
+                        return []
                     log.warning("analyst fetch failed for %s: %s", ticker, e)
                     continue
                 except Exception as e:
+                    self._health.record_error(
+                        reason="upstream_error",
+                        duration_ms=(time_module.perf_counter() - t0) * 1000,
+                    )
                     log.warning("analyst fetch failed for %s: %s", ticker, e)
                     continue
                 for item in data or []:

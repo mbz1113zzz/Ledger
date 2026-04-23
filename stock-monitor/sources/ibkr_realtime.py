@@ -29,6 +29,10 @@ class IbkrClient:
         self._bar_handles: dict[str, object] = {}
         self._on_tick: Callable[[str, float, datetime], None] | None = None
         self._on_bar: Callable[[str, dict], None] | None = None
+        self._connect_attempts = 0
+        self._reconnect_successes = 0
+        self._last_connect_at: datetime | None = None
+        self._last_error: str | None = None
 
     def on_tick(self, cb: Callable[[str, float, datetime], None]) -> None:
         self._on_tick = cb
@@ -37,8 +41,11 @@ class IbkrClient:
         self._on_bar = cb
 
     async def connect(self) -> None:
+        self._connect_attempts += 1
         await self._ib.connectAsync(host=self._host, port=self._port,
                                     clientId=self._client_id)
+        self._last_connect_at = datetime.now(timezone.utc)
+        self._last_error = None
 
     async def connect_with_retry(self, max_attempts: int = 1_000_000) -> None:
         delay = 1
@@ -50,11 +57,17 @@ class IbkrClient:
         self._bar_handles.clear()
         while attempt < max_attempts:
             try:
+                self._connect_attempts += 1
                 await self._ib.connectAsync(host=self._host, port=self._port,
                                             clientId=self._client_id)
+                self._last_connect_at = datetime.now(timezone.utc)
+                self._last_error = None
+                if attempt > 0:
+                    self._reconnect_successes += 1
                 return
             except Exception as e:
                 attempt += 1
+                self._last_error = str(e)
                 if attempt >= max_attempts:
                     raise
                 log.warning("IBKR connect failed (%s); retry in %ds", e, delay)
@@ -153,6 +166,19 @@ class IbkrClient:
             return bool(self._ib.isConnected())
         except Exception:
             return False
+
+    def snapshot(self) -> dict:
+        return {
+            "host": self._host,
+            "port": self._port,
+            "client_id": self._client_id,
+            "connected": self.is_alive(),
+            "active_tickers": sorted(self._tick_handles.keys()),
+            "connect_attempts": self._connect_attempts,
+            "reconnect_successes": self._reconnect_successes,
+            "last_connect_at": self._last_connect_at.isoformat() if self._last_connect_at else None,
+            "last_error": self._last_error,
+        }
 
     async def disconnect(self) -> None:
         if self._ib.isConnected():

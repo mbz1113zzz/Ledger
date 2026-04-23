@@ -8,11 +8,15 @@ const addForm = document.getElementById('add-form');
 const addInput = document.getElementById('add-input');
 const addError = document.getElementById('add-error');
 const impChecks = document.querySelectorAll('aside input[data-imp]');
+const execModePaperBtn = document.getElementById('exec-mode-paper');
+const execModeDryBtn = document.getElementById('exec-mode-dry');
+const execModeLiveBtn = document.getElementById('exec-mode-live');
 
 let selectedTicker = null;
 let allEvents = [];
 let watchlistCache = [];
 let paperCache = { positions: [], trades: [], equity: [] };
+let executionCache = null;
 const MAX_EVENTS = 1000;
 
 /* ---------- theme ---------- */
@@ -47,6 +51,19 @@ function formatTime(iso) {
     + ' · ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
 }
 
+function formatDiagTime(iso) {
+  if (!iso) return '-';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '-';
+  return d.toLocaleString('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -60,6 +77,7 @@ function pillFor(type) {
   if (type === 'analyst')     return { cls: 'analyst', label: '分析师' };
   if (type === 'insider')     return { cls: 'insider', label: '内部人' };
   if (type === 'sentiment')   return { cls: 'sentiment', label: '📣 舆情' };
+  if (type === 'execution_intent') return { cls: 'price', label: '执行' };
   return { cls: 'news', label: 'News' };
 }
 
@@ -125,6 +143,45 @@ function money(n) {
   return `${sign}$${Number(n || 0).toFixed(2)}`;
 }
 
+function executionModeLabel(mode) {
+  if (mode === 'dry_live') return 'DRY-LIVE';
+  if (mode === 'live') return 'LIVE';
+  return 'PAPER';
+}
+
+function renderExecutionPanel() {
+  const card = document.getElementById('execution-mode-card');
+  const blockersEl = document.getElementById('execution-blockers');
+  if (!card || !blockersEl) return;
+  const exec = executionCache || {};
+  const readiness = exec.readiness || {};
+  const blockers = readiness.blockers || [];
+  const mode = exec.mode || 'paper';
+  card.innerHTML = `
+    <div class="execution-head">
+      <span class="execution-mode mode-${escapeHtml(mode)}">${executionModeLabel(mode)}</span>
+      <span class="execution-ready ${readiness.live_ready ? 'ready' : 'blocked'}">${readiness.live_ready ? 'LIVE READY' : 'LOCKED'}</span>
+    </div>
+    <div class="execution-metrics">
+      <span>Closed <b>${readiness.closed_trades ?? 0}</b></span>
+      <span>Win <b>${readiness.win_rate_pct == null ? '-' : `${Number(readiness.win_rate_pct).toFixed(1)}%`}</b></span>
+      <span>RR <b>${readiness.avg_rr == null ? '-' : Number(readiness.avg_rr).toFixed(2)}</b></span>
+    </div>
+  `;
+  blockersEl.innerHTML = blockers.length
+    ? blockers.slice(0, 3).map(b => `<div class="execution-blocker">${escapeHtml(b)}</div>`).join('')
+    : '<div class="execution-clear">当前已满足切换门槛</div>';
+  [
+    [execModePaperBtn, 'paper'],
+    [execModeDryBtn, 'dry_live'],
+    [execModeLiveBtn, 'live'],
+  ].forEach(([btn, value]) => {
+    if (!btn) return;
+    btn.classList.toggle('active', mode === value);
+    btn.disabled = false;
+  });
+}
+
 function renderPaperPanel() {
   const statsEl = document.getElementById('paper-stats');
   const positionsEl = document.getElementById('paper-positions');
@@ -153,7 +210,7 @@ function renderPaperPanel() {
         ${p.side === 'short' ? '-' : '+'}${p.qty} 股 · 入场 ${Number(p.entry_price).toFixed(2)} · 现价 ${Number(p.mark_price).toFixed(2)}
       </div>
       <div class="paper-pos-meta">
-        SL ${Number(p.sl).toFixed(2)} · TP ${Number(p.tp).toFixed(2)} · ${escapeHtml(p.reason)}
+        SL ${Number(p.sl).toFixed(2)} · TP ${Number(p.tp).toFixed(2)} · Fee ${Number(p.entry_fee || 0).toFixed(2)} · ${escapeHtml(p.reason)}
       </div>
     </div>
   `).join('');
@@ -269,6 +326,46 @@ async function loadPaper() {
   } catch (e) { /* silent */ }
 }
 
+async function loadExecutionMode() {
+  try {
+    const r = await fetch('/api/execution-mode');
+    const d = await r.json();
+    executionCache = d;
+    renderExecutionPanel();
+  } catch (e) { /* silent */ }
+}
+
+async function setExecutionMode(mode) {
+  const buttons = [execModePaperBtn, execModeDryBtn, execModeLiveBtn].filter(Boolean);
+  buttons.forEach(btn => { btn.disabled = true; });
+  try {
+    const r = await fetch('/api/execution-mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const detail = body.detail || body;
+      const blockers = detail?.readiness?.blockers || [];
+      openModal('执行模式切换失败', `
+        <p class="empty-note">目标模式：${escapeHtml(executionModeLabel(mode))}</p>
+        <div class="execution-modal-blockers">
+          ${(blockers.length ? blockers : [detail?.error || 'unknown error']).map(b => `<div class="execution-blocker">${escapeHtml(String(b))}</div>`).join('')}
+        </div>
+      `);
+      return;
+    }
+    executionCache = body;
+    renderExecutionPanel();
+    await loadPaper();
+    await loadHealth();
+    await loadHistory();
+  } finally {
+    buttons.forEach(btn => { btn.disabled = false; });
+  }
+}
+
 async function loadHistory() {
   const r = await fetch('/api/events?limit=500');
   const data = await r.json();
@@ -303,13 +400,14 @@ async function openPaperTrades() {
         <td>${escapeHtml(t.side)}</td>
         <td>${t.qty}</td>
         <td>${Number(t.price).toFixed(2)}</td>
+        <td>${t.fee == null ? '' : Number(t.fee).toFixed(2)}</td>
         <td>${escapeHtml(t.reason)}</td>
         <td class="${Number(t.pnl || 0) >= 0 ? 'pos' : 'neg'}">${t.pnl == null ? '' : money(t.pnl)}</td>
       </tr>
     `).join('');
     openModal('成交记录', `
       <table>
-        <thead><tr><th style="text-align:left">时间</th><th>票</th><th>方向</th><th>qty</th><th>价格</th><th>原因</th><th>PnL</th></tr></thead>
+        <thead><tr><th style="text-align:left">时间</th><th>票</th><th>方向</th><th>qty</th><th>价格</th><th>Fee</th><th>原因</th><th>PnL</th></tr></thead>
         <tbody>${rows}</tbody>
       </table>
     `);
@@ -463,6 +561,86 @@ async function openPaperStats() {
     `);
   } catch (e) {
     openModal('胜率面板', `<p class="empty-note">加载失败: ${e.message}</p>`);
+  }
+}
+
+async function openDiagnostics() {
+  openModal('运行诊断', '<p class="empty-note">加载中…</p>');
+  try {
+    const r = await fetch('/api/diagnostics');
+    const d = await r.json();
+    const startup = d.startup || {};
+    const ibkr = d.ibkr || {};
+    const execution = d.execution || {};
+    const readiness = execution.readiness || {};
+    const blockers = readiness.blockers || [];
+    const rows = (d.sources || []).map(src => `
+      <tr>
+        <td class="win">${escapeHtml(src.name)}</td>
+        <td>${escapeHtml(src.group || '')}</td>
+        <td>${src.request_count ?? 0}</td>
+        <td>${src.success_count ?? 0}</td>
+        <td>${src.error_count ?? 0}</td>
+        <td>${src.consecutive_4xx ?? 0}</td>
+        <td>${src.last_status ?? '-'}</td>
+        <td>${escapeHtml(src.reason || 'ok')}</td>
+        <td>${src.last_duration_ms == null ? '' : `${Number(src.last_duration_ms).toFixed(0)}ms`}</td>
+        <td>${formatDiagTime(src.last_success_at)}</td>
+        <td>${formatDiagTime(src.last_error_at)}</td>
+      </tr>
+    `).join('');
+    openModal('运行诊断', `
+      <div class="diag-grid">
+        <div class="diag-card">
+          <h4>Startup</h4>
+          <p>Status: <b>${escapeHtml(startup.status || 'unknown')}</b></p>
+          <p>Running: <b>${startup.running ? 'yes' : 'no'}</b></p>
+          <p>Started: <b>${formatDiagTime(startup.started_at)}</b></p>
+          <p>Finished: <b>${formatDiagTime(startup.finished_at)}</b></p>
+          <p>Duration: <b>${startup.duration_ms == null ? '-' : `${Number(startup.duration_ms).toFixed(0)}ms`}</b></p>
+          <p>Error: <b>${escapeHtml(startup.error || '-')}</b></p>
+        </div>
+        <div class="diag-card">
+          <h4>Pipelines</h4>
+          <p>News last run: <b>${escapeHtml(d.news_pipeline?.last_run_at || '-')}</b></p>
+          <p>News inserted: <b>${d.news_pipeline?.last_run_inserted ?? 0}</b></p>
+          <p>Watchlist size: <b>${d.news_pipeline?.ticker_count ?? 0}</b></p>
+          <p>Price last run: <b>${escapeHtml(d.price_pipeline?.last_run_at || '-')}</b></p>
+          <p>Price inserted: <b>${d.price_pipeline?.last_run_inserted ?? 0}</b></p>
+        </div>
+        <div class="diag-card">
+          <h4>IBKR</h4>
+          <p>Connected: <b>${ibkr ? (ibkr.connected ? 'yes' : 'no') : 'n/a'}</b></p>
+          <p>Connect attempts: <b>${ibkr?.connect_attempts ?? '-'}</b></p>
+          <p>Reconnect successes: <b>${ibkr?.reconnect_successes ?? '-'}</b></p>
+          <p>Last connect: <b>${formatDiagTime(ibkr?.last_connect_at)}</b></p>
+          <p>Active tickers: <b>${(ibkr?.active_tickers || []).join(', ') || '-'}</b></p>
+          <p>Last error: <b>${escapeHtml(ibkr?.last_error || '-')}</b></p>
+        </div>
+        <div class="diag-card">
+          <h4>Execution</h4>
+          <p>Mode: <b>${escapeHtml(execution.mode || 'paper')}</b></p>
+          <p>Live ready: <b>${readiness.live_ready ? 'yes' : 'no'}</b></p>
+          <p>Closed trades: <b>${readiness.closed_trades ?? 0}</b></p>
+          <p>Win rate: <b>${readiness.win_rate_pct == null ? '-' : `${Number(readiness.win_rate_pct).toFixed(2)}%`}</b></p>
+          <p>Avg RR: <b>${readiness.avg_rr == null ? '-' : Number(readiness.avg_rr).toFixed(2)}</b></p>
+          <p>Blockers: <b>${blockers.length}</b></p>
+        </div>
+      </div>
+      ${blockers.length ? `
+        <div class="execution-modal-blockers">
+          ${blockers.map(b => `<div class="execution-blocker">${escapeHtml(b)}</div>`).join('')}
+        </div>
+      ` : ''}
+      <div class="diag-table-wrap">
+        <table>
+          <thead><tr><th style="text-align:left">Source</th><th>Group</th><th>Req</th><th>OK</th><th>Err</th><th>4xx</th><th>Status</th><th>Reason</th><th>Latency</th><th>Last OK</th><th>Last Err</th></tr></thead>
+          <tbody>${rows || '<tr><td class="win" colspan="11">No source diagnostics</td></tr>'}</tbody>
+        </table>
+      </div>
+    `);
+  } catch (e) {
+    openModal('运行诊断', `<p class="empty-note">加载失败: ${e.message}</p>`);
   }
 }
 
@@ -775,6 +953,7 @@ function connectStream() {
     if (allEvents.length > MAX_EVENTS) allEvents.length = MAX_EVENTS;
     render();
     if (ev.event_type === 'smc_entry') loadPaper();
+    if (ev.event_type === 'execution_intent') loadExecutionMode();
     if (ev.importance === 'high' && notifToggle.checked
         && Notification.permission === 'granted') {
       new Notification(`${ev.ticker}: ${ev.title}`, { body: ev.summary || '' });
@@ -816,6 +995,27 @@ document.getElementById('btn-digest').addEventListener('click', async () => {
     openModal('早报预览', `<p class="empty-note">加载失败: ${e.message}</p>`);
   }
 });
+document.getElementById('btn-diagnostics').addEventListener('click', openDiagnostics);
+document.getElementById('btn-execution-readiness').addEventListener('click', async () => {
+  await loadExecutionMode();
+  const exec = executionCache || {};
+  const readiness = exec.readiness || {};
+  const blockers = readiness.blockers || [];
+  openModal('执行护栏', `
+    <div class="execution-modal-summary">
+      <p>当前模式：<b>${escapeHtml(executionModeLabel(exec.mode || 'paper'))}</b></p>
+      <p>已平仓：<b>${readiness.closed_trades ?? 0}</b> / ${readiness.min_closed_trades ?? '-'}</p>
+      <p>胜率：<b>${readiness.win_rate_pct == null ? '-' : `${Number(readiness.win_rate_pct).toFixed(2)}%`}</b> / ${readiness.min_win_rate_pct == null ? '-' : `${Number(readiness.min_win_rate_pct).toFixed(2)}%`}</p>
+      <p>平均 RR：<b>${readiness.avg_rr == null ? '-' : Number(readiness.avg_rr).toFixed(2)}</b> / ${readiness.min_avg_rr == null ? '-' : Number(readiness.min_avg_rr).toFixed(2)}</p>
+    </div>
+    <div class="execution-modal-blockers">
+      ${(blockers.length ? blockers : ['当前无阻断项']).map(b => `<div class="execution-blocker">${escapeHtml(String(b))}</div>`).join('')}
+    </div>
+  `);
+});
+execModePaperBtn.addEventListener('click', () => setExecutionMode('paper'));
+execModeDryBtn.addEventListener('click', () => setExecutionMode('dry_live'));
+execModeLiveBtn.addEventListener('click', () => setExecutionMode('live'));
 document.getElementById('btn-chart').addEventListener('click', () => openChartPanel(selectedTicker || watchlistCache[0] || 'NVDA'));
 document.getElementById('btn-paper-trades').addEventListener('click', openPaperTrades);
 document.getElementById('btn-paper-equity').addEventListener('click', openPaperEquity);
@@ -903,12 +1103,17 @@ function renderSources(d) {
   const ul = document.getElementById('sources-list');
   const dotClass = (status) => {
     if (status === 'ok') return 'ok';
-    if (status === 'permission_denied') return 'warn';
+    if (['permission_denied', 'quota_exhausted', 'client_error', 'timeout', 'upstream_error'].includes(status)) {
+      return 'warn';
+    }
     return 'disabled';
   };
   const label = (status, detail) => {
     if (status === 'permission_denied') return detail ? `403 / tier` : 'tier';
+    if (status === 'quota_exhausted') return detail ? `${detail} / quota` : 'quota';
     if (status === 'client_error') return detail ? `${detail}` : '4xx';
+    if (status === 'timeout') return 'timeout';
+    if (status === 'upstream_error') return detail ? `${detail}` : 'upstream';
     if (status === 'disabled') return 'off';
     return '';
   };
@@ -940,7 +1145,9 @@ function renderSources(d) {
   await loadHistory();
   await loadPaper();
   await loadHealth();
+  await loadExecutionMode();
   setInterval(loadHealth, 30000);
   setInterval(loadPaper, 30000);
+  setInterval(loadExecutionMode, 30000);
   connectStream();
 })();

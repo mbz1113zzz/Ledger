@@ -33,6 +33,8 @@ class StreamingRunner:
                  smc_max_risk_pct: float = 0.015,
                  smc_min_rr: float = 2.0,
                  smc_tick_size: float = 0.01,
+                 smc_ob_max_age_min: int = 120,
+                 execution_controller=None,
                  paper_broker: PaperBroker | None = None):
         self._client = client
         self._storage = storage
@@ -55,6 +57,8 @@ class StreamingRunner:
         self._smc_max_risk_pct = smc_max_risk_pct
         self._smc_min_rr = smc_min_rr
         self._smc_tick_size = smc_tick_size
+        self._smc_ob_max_age_min = smc_ob_max_age_min
+        self._execution = execution_controller
         self._loop: asyncio.AbstractEventLoop | None = None
         self._stopping = False
         self._watchdog_task: asyncio.Task | None = None
@@ -64,7 +68,7 @@ class StreamingRunner:
     def _smc_for(self, ticker: str) -> tuple[StructureTracker, OrderBlockIndex, LiquidityPoolIndex, SmcEngine]:
         if ticker not in self._structure:
             self._structure[ticker] = StructureTracker(ticker, self._fractal_window)
-            self._obs[ticker] = OrderBlockIndex(ticker)
+            self._obs[ticker] = OrderBlockIndex(ticker, max_age_min=self._smc_ob_max_age_min)
             self._liq[ticker] = LiquidityPoolIndex(ticker)
             self._engines[ticker] = SmcEngine(
                 ticker=ticker,
@@ -144,7 +148,8 @@ class StreamingRunner:
         self._buf.update(ticker, price, ts)
         for sig in self._detector.feed(ticker, price, ts):
             await self._router.on_anomaly(sig)
-        if self._paper_broker is not None:
+        mode = getattr(self._execution, "mode", "paper")
+        if self._paper_broker is not None and (mode == "paper" or self._paper_broker.has_open_positions()):
             await self._paper_broker.on_tick(ticker, price, ts)
 
     async def on_bar(self, ticker: str, bar: dict) -> None:
@@ -189,8 +194,23 @@ class StreamingRunner:
             pending_low_prices=pending_lows,
         ):
             signal_id = await self._router.on_smc_signal(sig)
-            if self._paper_broker is not None:
+            mode = getattr(self._execution, "mode", "paper")
+            if mode == "paper" and self._paper_broker is not None:
                 await self._paper_broker.on_smc_signal(sig, signal_id=signal_id)
+            elif mode == "dry_live":
+                await self._router.on_execution_intent(
+                    sig,
+                    mode=mode,
+                    status="observed",
+                    note="dry-live mode: signal observed, no order submitted",
+                )
+            else:
+                await self._router.on_execution_intent(
+                    sig,
+                    mode=mode,
+                    status="blocked",
+                    note="live mode remains blocked until a live execution lane is implemented and unlocked",
+                )
 
     async def stop(self) -> None:
         self._stopping = True
@@ -240,5 +260,7 @@ def build_runner_if_enabled(*, storage, notifier, push_hub, tickers, paper_broke
         smc_max_risk_pct=config.SMC_MAX_RISK_PCT,
         smc_min_rr=config.SMC_MIN_RR,
         smc_tick_size=config.SMC_TICK_SIZE,
+        smc_ob_max_age_min=config.SMC_OB_MAX_AGE_MIN,
+        execution_controller=getattr(notifier, "_execution_controller", None),
         paper_broker=paper_broker,
     )

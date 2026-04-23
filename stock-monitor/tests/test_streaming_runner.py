@@ -1,11 +1,16 @@
 import asyncio
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock
 
 from notifier import Notifier
+from paper.broker import PaperBroker
+from paper.ledger import Ledger
+from paper.pricing import PriceBook
+from paper.strategy import SmcLongStrategy
 from storage import Storage
 from streaming.runner import StreamingRunner, build_runner_if_enabled
+from smc.types import SmcSignal
 
 
 def _storage():
@@ -127,3 +132,66 @@ async def test_watchdog_reconnects_when_client_drops():
     assert fake_client.connect_with_retry.await_count >= 2
     # set_tickers called for initial subscribe and for watchdog reconnect.
     assert fake_client.set_tickers.call_count >= 2
+
+
+async def test_runner_wires_configurable_ob_age():
+    s = _storage()
+    fake_client = MagicMock()
+    fake_client.connect_with_retry = AsyncMock()
+    fake_client.set_tickers = MagicMock()
+    fake_client.on_tick = MagicMock()
+    fake_client.on_bar = MagicMock()
+    fake_client.disconnect = AsyncMock()
+    runner = StreamingRunner(
+        client=fake_client, storage=s, notifier=Notifier(), push_hub=None,
+        tickers=["NVDA"], tiers=[("high", 0.03)], cooldown_sec=300,
+        smc_ob_max_age_min=15,
+    )
+    await runner.start()
+    try:
+        runner._smc_for("NVDA")
+        assert runner._obs["NVDA"]._max_age == timedelta(minutes=15)
+    finally:
+        await runner.stop()
+
+
+async def test_dry_live_mode_emits_execution_intent_instead_of_opening_trade():
+    s = _storage()
+    fake_client = MagicMock()
+    fake_client.connect_with_retry = AsyncMock()
+    fake_client.set_tickers = MagicMock()
+    fake_client.on_tick = MagicMock()
+    fake_client.on_bar = MagicMock()
+    fake_client.disconnect = AsyncMock()
+    broker = PaperBroker(
+        ledger=Ledger(s),
+        strategy=SmcLongStrategy(),
+        prices=PriceBook(),
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
+    )
+    runner = StreamingRunner(
+        client=fake_client, storage=s, notifier=Notifier(), push_hub=None,
+        tickers=["NVDA"], tiers=[("high", 0.03)], cooldown_sec=300,
+        execution_controller=type("Exec", (), {"mode": "dry_live"})(),
+        paper_broker=broker,
+    )
+    await runner.start()
+    try:
+        sig = SmcSignal(
+            ts=datetime(2026, 4, 19, 14, 31, tzinfo=timezone.utc),
+            ticker="NVDA",
+            entry=100.0,
+            sl=99.0,
+            tp=102.0,
+            reason="smc_bos_ob",
+        )
+        runner._router.on_smc_signal = AsyncMock(return_value=12)
+        runner._router.on_execution_intent = AsyncMock()
+        runner._smc_for = MagicMock(return_value=(None, None, type("Liq", (), {"pending": lambda self: []})(), type("Engine", (), {"on_entry_candle": lambda self, candle, **kwargs: [sig]})()))
+        await runner._on_candle_closed("NVDA", type("Candle", (), {"tf": "1m"})())
+        runner._router.on_execution_intent.assert_awaited_once()
+        assert broker.ledger.positions_payload() == []
+    finally:
+        await runner.stop()

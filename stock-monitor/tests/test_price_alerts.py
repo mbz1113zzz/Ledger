@@ -3,6 +3,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from sources.price_alerts import PriceAlertSource
+from sources.health import SourceHealth
 
 
 def _quote(c, pc):
@@ -70,3 +71,13 @@ async def test_failure_for_one_ticker_doesnt_block_others():
         events = await src.fetch(["BAD", "NVDA"])
     assert len(events) == 1
     assert events[0].ticker == "NVDA"
+
+
+@pytest.mark.asyncio
+async def test_disabled_health_skips_price_polling():
+    src = PriceAlertSource(api_key="k", threshold_pct=3.0)
+    for _ in range(SourceHealth.THRESHOLD):
+        src._health.record_http_error(403)
+    with patch.object(src, "_quote", new=AsyncMock(side_effect=AssertionError("should not call"))):
+        events = await src.fetch(["NVDA"])
+    assert events == []

@@ -1,10 +1,12 @@
 import logging
+import time
 from datetime import datetime, timezone
 from typing import Any
 
 import httpx
 
 from sources.base import Event, Source
+from sources.health import SourceHealth
 
 log = logging.getLogger(__name__)
 
@@ -18,6 +20,7 @@ class PriceAlertSource(Source):
     def __init__(self, api_key: str, threshold_pct: float = 3.0):
         self._api_key = api_key
         self._threshold = threshold_pct
+        self._health = SourceHealth(self.name)
 
     async def _quote(self, client: httpx.AsyncClient, ticker: str) -> dict[str, Any] | None:
         resp = await client.get(
@@ -28,16 +31,37 @@ class PriceAlertSource(Source):
         return resp.json() or None
 
     async def fetch(self, tickers: list[str]) -> list[Event]:
-        if not self._api_key:
+        if not self._api_key or self._health.disabled:
             return []
         events: list[Event] = []
         now = datetime.now(timezone.utc)
         day = now.strftime("%Y%m%d")
         async with httpx.AsyncClient(timeout=10.0) as client:
             for ticker in tickers:
+                t0 = time.perf_counter()
                 try:
                     q = await self._quote(client, ticker)
+                    self._health.record_success(duration_ms=(time.perf_counter() - t0) * 1000)
+                except httpx.TimeoutException as e:
+                    self._health.record_timeout(
+                        duration_ms=(time.perf_counter() - t0) * 1000,
+                    )
+                    log.warning("price quote timed out for %s: %s", ticker, e)
+                    continue
+                except httpx.HTTPStatusError as e:
+                    self._health.record_http_error(
+                        e.response.status_code,
+                        duration_ms=(time.perf_counter() - t0) * 1000,
+                    )
+                    if self._health.disabled:
+                        return events
+                    log.warning("price quote failed for %s: %s", ticker, e)
+                    continue
                 except Exception as e:
+                    self._health.record_error(
+                        reason="upstream_error",
+                        duration_ms=(time.perf_counter() - t0) * 1000,
+                    )
                     log.warning("price quote failed for %s: %s", ticker, e)
                     continue
                 if not q:

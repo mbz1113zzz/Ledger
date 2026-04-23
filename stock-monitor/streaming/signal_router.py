@@ -95,6 +95,31 @@ class SignalRouter:
             await self._n.publish(self._serialize(ev))
         return event_id
 
+    async def on_execution_intent(self, sig: SmcSignal, *, mode: str, status: str, note: str) -> int | None:
+        ext = f"ibkr:exec:{sig.ticker}:{mode}:{status}:{_minute_bucket(sig.ts)}"
+        ev = Event(
+            source="system",
+            external_id=ext,
+            ticker=sig.ticker,
+            event_type="execution_intent",
+            title=f"{sig.ticker} execution {mode} {status}",
+            summary=note,
+            url=None,
+            published_at=sig.ts,
+            raw={
+                **_serializable_asdict(sig),
+                "mode": mode,
+                "status": status,
+                "note": note,
+            },
+            importance="high",
+            summary_cn=None,
+        )
+        inserted, event_id = self._s.insert_with_id(ev)
+        if inserted:
+            await self._n.publish(self._serialize(ev))
+        return event_id
+
     @staticmethod
     def _serialize(ev: Event) -> dict:
         d = asdict(ev)
