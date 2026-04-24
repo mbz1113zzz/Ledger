@@ -46,6 +46,14 @@ def build_router(
     async def index():
         return FileResponse(STATIC_DIR / "index.html")
 
+    @router.get("/events")
+    async def events_page():
+        return FileResponse(STATIC_DIR / "index.html")
+
+    @router.get("/paper")
+    async def paper_page():
+        return FileResponse(STATIC_DIR / "paper.html")
+
     @router.get("/api/events")
     async def list_events(
         importance: str | None = None,
@@ -197,7 +205,7 @@ def build_router(
             raise HTTPException(status_code=503, detail="execution controller unavailable")
         ok, body = execution.set_mode(payload.mode)
         if ok:
-            if payload.mode != "paper":
+            if payload.mode == "live":
                 canceled = paper_broker.cancel_pending_entries()
                 body["pending_entries_canceled"] = canceled
             return body

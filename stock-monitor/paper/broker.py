@@ -222,10 +222,10 @@ class PaperBroker:
         signal = pending.signal
         if ts <= signal.ts or self._ledger.position_for(ticker) is not None:
             return None
-        self._pending_entries.pop(ticker, None)
         blocked = self._check_risk_gate(ts)
         if blocked is not None:
             log.info("paper pending entry for %s canceled: %s", ticker, blocked)
+            self._pending_entries.pop(ticker, None)
             return None
         fill_price = self._apply_slippage(price=price, side=signal.side, action="entry")
         filled_signal = replace(signal, ts=ts, entry=fill_price)
@@ -233,11 +233,14 @@ class PaperBroker:
             filled_signal, equity=self._ledger.equity_now(), cash=self._ledger.cash
         )
         if qty <= 0:
+            self._pending_entries.pop(ticker, None)
             return None
         blocked = self._check_portfolio_limits(filled_signal, qty)
         if blocked is not None:
             log.info("paper pending entry for %s canceled: %s", ticker, blocked)
+            self._pending_entries.pop(ticker, None)
             return None
+        self._pending_entries.pop(ticker, None)
         fee = self._commission(qty)
         self._prices.update(signal.ticker, fill_price, ts)
         pos = self._ledger.open_position(

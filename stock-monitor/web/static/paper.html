@@ -3,25 +3,25 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Ledger — 美股事件监控</title>
+  <title>Ledger — 模拟盘工作台</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/static/style.css">
 </head>
-<body data-theme="dark" data-page="events">
+<body data-theme="dark" data-page="paper">
   <header>
     <div class="brand">
       <span class="mark">◆</span>
       <div class="brand-copy">
-        <h1>Ledger <em>·</em> <span class="sub">美股事件监控</span></h1>
-        <p class="brand-note">Research-driven event desk for catalysts, structure, and paper execution.</p>
+        <h1>Ledger <em>·</em> <span class="sub">模拟盘工作台</span></h1>
+        <p class="brand-note">Paper trading workspace for positions, execution mode, review, and operational diagnostics.</p>
       </div>
       <span id="conn-dot" class="conn-dot" title="连接中" aria-label="连接状态"></span>
     </div>
     <nav class="page-nav" aria-label="页面导航">
-      <a href="/events" class="page-link is-active">事件页</a>
-      <a href="/paper" class="page-link">模拟盘</a>
+      <a href="/events" class="page-link">事件页</a>
+      <a href="/paper" class="page-link is-active">模拟盘</a>
     </nav>
     <div class="controls">
       <button id="refresh-btn" class="icon-btn" title="立即刷新" aria-label="刷新">
@@ -41,9 +41,9 @@
   <main class="page-shell">
     <section class="hero-band">
       <div class="hero-copy">
-        <p class="hero-kicker">Market Workbench</p>
-        <h2>Monitor catalysts, structure, and paper execution in one calm surface.</h2>
-        <p class="hero-blurb">Built for daily scanning: filings, live anomalies, SMC structure, readiness guardrails, and operating diagnostics without losing the tape.</p>
+        <p class="hero-kicker">Paper Trading Desk</p>
+        <h2>Track open risk, execution state, and post-trade review in a dedicated workspace.</h2>
+        <p class="hero-blurb">Use this page for position monitoring, equity inspection, mode switches, and setup-level review without mixing in the market event tape.</p>
       </div>
       <div class="hero-spotlight">
         <span class="hero-spotlight-label">Execution Lane</span>
@@ -54,17 +54,17 @@
         <article class="hero-metric-card">
           <span class="hero-label">Universe</span>
           <strong id="hero-watchlist-count">0</strong>
-          <span id="hero-watchlist-note" class="hero-note">waiting for watchlist</span>
+          <span id="hero-watchlist-note" class="hero-note">watchlist loaded for chart tools</span>
         </article>
         <article class="hero-metric-card">
           <span class="hero-label">Feed Cache</span>
           <strong id="hero-event-count">0</strong>
-          <span id="hero-event-note" class="hero-note">loading event history</span>
+          <span id="hero-event-note" class="hero-note">cached events remain available in the background</span>
         </article>
         <article class="hero-metric-card">
           <span class="hero-label">High Signals</span>
           <strong id="hero-high-count">0</strong>
-          <span id="hero-high-note" class="hero-note">no high-priority events yet</span>
+          <span id="hero-high-note" class="hero-note">high-priority events synced for context</span>
         </article>
         <article class="hero-metric-card">
           <span class="hero-label">Paper Equity</span>
@@ -129,6 +129,16 @@
     </aside>
 
     <section class="content-stage">
+      <div class="stage-head paper-only">
+        <div class="stage-copy">
+          <p class="stage-kicker">Paper Workspace</p>
+          <h3>Position and review surface</h3>
+        </div>
+        <div class="stage-meta">
+          <span id="feed-context" class="feed-context">Paper trading</span>
+          <span id="summary" class="summary">Paper book and execution context</span>
+        </div>
+      </div>
       <div class="stage-head events-only">
         <div class="stage-copy">
           <p class="stage-kicker">Live Tape</p>
@@ -153,16 +163,6 @@
         <span class="ribbon-placeholder">Structure marks and live IBKR state will appear here during the session.</span>
       </div>
       <section id="feed" class="events-only" aria-live="polite"></section>
-      <section id="workbench-stage" class="workbench-stage hidden" aria-live="polite">
-        <div class="workbench-stage-head">
-          <div>
-            <p id="workbench-kicker" class="stage-kicker">Workbench</p>
-            <h3 id="workbench-title">工具台</h3>
-          </div>
-          <button id="workbench-back" class="tool-btn tool-btn-inline">返回事件流</button>
-        </div>
-        <div id="workbench-body" class="workbench-body"></div>
-      </section>
     </section>
     </section>
 

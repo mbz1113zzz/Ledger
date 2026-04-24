@@ -69,7 +69,7 @@ class AnalystSource(Source):
                         duration_ms=(time_module.perf_counter() - t0) * 1000,
                     )
                     if self._health.disabled:
-                        return []
+                        return events
                     log.warning("analyst fetch failed for %s: %s", ticker, e)
                     continue
                 except Exception as e:
@@ -95,12 +95,19 @@ class AnalystSource(Source):
         except (KeyError, TypeError):
             return None
         try:
-            pub = datetime.combine(
-                datetime.strptime(grade_time, "%Y-%m-%d").date(),
-                time(0, 0),
-                tzinfo=timezone.utc,
-            )
-        except (ValueError, TypeError):
+            # Finnhub returns gradeTime as a Unix timestamp integer; fall back
+            # to "YYYY-MM-DD" for older API versions or test fixtures.
+            try:
+                pub = datetime.fromtimestamp(int(grade_time), tz=timezone.utc).replace(
+                    hour=0, minute=0, second=0, microsecond=0
+                )
+            except (ValueError, TypeError):
+                pub = datetime.combine(
+                    datetime.strptime(str(grade_time), "%Y-%m-%d").date(),
+                    time(0, 0),
+                    tzinfo=timezone.utc,
+                )
+        except (ValueError, TypeError, OSError):
             return None
         action_cn = ACTION_CN.get(action, action or "评级变动")
         from_cn = GRADE_CN.get(from_g.lower(), from_g)

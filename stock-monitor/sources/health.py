@@ -69,7 +69,7 @@ class SourceHealth:
             duration_ms=duration_ms,
             reset_streak=not (400 <= status < 500),
         )
-        if self._disabled or not (400 <= status < 500):
+        if self._disabled or not (400 <= status < 500) or status == 429:
             return
         self._consecutive_4xx += 1
         if self._consecutive_4xx >= self.THRESHOLD:

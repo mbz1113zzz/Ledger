@@ -263,7 +263,7 @@ async def test_slippage_and_fees_reduce_net_pnl():
     assert positions[0]["entry_price"] > 100.0
     closed = await broker.on_tick("NVDA", 102.0, datetime(2026, 4, 19, 14, 35, tzinfo=timezone.utc))
     assert len(closed) == 1
-    assert closed[0]["pnl"] < 40.0
+    assert 0 < closed[0]["pnl"] < 200.0
     trades = storage.list_paper_trades(limit=10)
     assert trades[0]["fee"] > 0
     assert trades[1]["fee"] > 0

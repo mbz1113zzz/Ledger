@@ -50,16 +50,16 @@ class IbkrClient:
     async def connect_with_retry(self, max_attempts: int = 1_000_000) -> None:
         delay = 1
         attempt = 0
-        # Clear any stale handles from a previous (now-dead) session.
-        # After reconnect we must re-request market data; the old Ticker/BarList
-        # objects are tied to the defunct socket and stop emitting events.
-        self._tick_handles.clear()
-        self._bar_handles.clear()
         while attempt < max_attempts:
             try:
                 self._connect_attempts += 1
                 await self._ib.connectAsync(host=self._host, port=self._port,
                                             clientId=self._client_id)
+                # Clear stale handles only after a successful connection so that
+                # a transient reconnect failure does not wipe the handle list and
+                # leave us with a live IB socket but no active subscriptions.
+                self._tick_handles.clear()
+                self._bar_handles.clear()
                 self._last_connect_at = datetime.now(timezone.utc)
                 self._last_error = None
                 if attempt > 0:

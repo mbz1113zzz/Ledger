@@ -111,6 +111,8 @@ class Ledger:
         cost = qty * signal.entry
         if signal.side == "long" and cost + fee > self.cash:
             return None
+        if signal.side == "short" and cost + fee > self.equity_now():
+            return None
         if signal.side == "long":
             self.cash -= cost + fee
         else:
@@ -220,13 +222,12 @@ class Ledger:
         pnl = gross_pnl - pos.entry_fee - fee
         total_risk = pos.qty * pos.risk_per_share
         rr = (pnl / total_risk) if total_risk > 0 else None
-        self._storage.delete_paper_position(ticker)
-        self._storage.insert_paper_trade(
-            ts=ts,
+        self._storage.close_paper_position(
             ticker=ticker,
             side="sell" if pos.side == "long" else "buy",
             qty=pos.qty,
             price=price,
+            ts=ts,
             reason=reason,
             pnl=pnl,
             signal_id=pos.signal_id,

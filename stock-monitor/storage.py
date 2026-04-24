@@ -307,6 +307,42 @@ class Storage:
         self._conn.execute("DELETE FROM paper_positions WHERE ticker=?", (ticker,))
         self._conn.commit()
 
+    def close_paper_position(
+        self,
+        *,
+        ticker: str,
+        side: str,
+        qty: int,
+        price: float,
+        ts: datetime,
+        reason: str,
+        pnl: float | None,
+        signal_id: int | None,
+        rr: float | None,
+        fee: float,
+    ) -> int:
+        """Delete position and record closing trade atomically."""
+        with self._conn:
+            self._conn.execute("DELETE FROM paper_positions WHERE ticker=?", (ticker,))
+            cur = self._conn.execute(
+                """INSERT INTO paper_trades
+                   (ts, ticker, side, qty, price, reason, pnl, signal_id, rr, fee)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    ts.isoformat(),
+                    ticker,
+                    side,
+                    qty,
+                    price,
+                    reason,
+                    pnl,
+                    signal_id,
+                    rr,
+                    fee,
+                ),
+            )
+        return cur.lastrowid
+
     def list_paper_positions(self) -> list[dict]:
         rows = self._conn.execute(
             "SELECT * FROM paper_positions ORDER BY updated_at DESC, ticker ASC"

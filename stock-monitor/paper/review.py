@@ -81,15 +81,22 @@ def build_daily_review(
             peak = max(peak, row["equity"])
             max_drawdown = min(max_drawdown, row["equity"] - peak)
 
-    entries_by_signal: dict[int | None, dict] = {}
+    entries_by_signal: dict[int, dict] = {}
+    null_entries: list[dict] = []
     closed_rows: list[dict] = []
     for row in sorted(trades, key=lambda item: (item["ts"], item["id"])):
         is_entry = str(row["reason"]).startswith("smc_")
         if is_entry:
-            entries_by_signal[row["signal_id"]] = row
+            if row["signal_id"] is not None:
+                entries_by_signal[row["signal_id"]] = row
+            else:
+                null_entries.append(row)
             continue
         if not is_entry:
-            entry = entries_by_signal.get(row["signal_id"])
+            if row["signal_id"] is not None:
+                entry = entries_by_signal.get(row["signal_id"])
+            else:
+                entry = null_entries.pop(0) if null_entries else None
             closed_rows.append({"entry": entry, "exit": row})
 
     signal_stats: dict[str, dict[str, float]] = defaultdict(
@@ -166,7 +173,7 @@ def build_daily_review(
             "|---|---:|---:|---:|---:|",
         ])
         for reason, stats in sorted(signal_stats.items()):
-            win_rate = (stats["wins"] / stats["entries"] * 100) if stats["entries"] else 0.0
+            win_rate = (stats["wins"] / stats["closed"] * 100) if stats["closed"] else 0.0
             avg_rr = (stats["rr_sum"] / stats["rr_n"]) if stats["rr_n"] else 0.0
             lines.append(
                 f"| {reason} | {int(stats['signals'])} | {int(stats['entries'])} | "

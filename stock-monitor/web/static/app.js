@@ -8,9 +8,31 @@ const addForm = document.getElementById('add-form');
 const addInput = document.getElementById('add-input');
 const addError = document.getElementById('add-error');
 const impChecks = document.querySelectorAll('aside input[data-imp]');
+const feedContext = document.getElementById('feed-context');
+const liveRibbon = document.getElementById('live-ribbon');
+const eventsStageHead = document.querySelector('.stage-head.events-only');
+const workbenchStage = document.getElementById('workbench-stage');
+const workbenchTitle = document.getElementById('workbench-title');
+const workbenchKicker = document.getElementById('workbench-kicker');
+const workbenchBody = document.getElementById('workbench-body');
+const workbenchBack = document.getElementById('workbench-back');
 const execModePaperBtn = document.getElementById('exec-mode-paper');
 const execModeDryBtn = document.getElementById('exec-mode-dry');
 const execModeLiveBtn = document.getElementById('exec-mode-live');
+const heroWatchlistCount = document.getElementById('hero-watchlist-count');
+const heroWatchlistNote = document.getElementById('hero-watchlist-note');
+const heroEventCount = document.getElementById('hero-event-count');
+const heroEventNote = document.getElementById('hero-event-note');
+const heroHighCount = document.getElementById('hero-high-count');
+const heroHighNote = document.getElementById('hero-high-note');
+const heroPaperEquity = document.getElementById('hero-paper-equity');
+const heroPaperNote = document.getElementById('hero-paper-note');
+const heroExecutionMode = document.getElementById('hero-execution-mode');
+const heroExecutionNote = document.getElementById('hero-execution-note');
+const paperPositionDesk = document.getElementById('paper-position-desk');
+const paperPositionStage = document.getElementById('paper-position-stage');
+const paperStageNote = document.getElementById('paper-stage-note');
+const pageMode = document.body.dataset.page || 'events';
 
 let selectedTicker = null;
 let allEvents = [];
@@ -131,16 +153,91 @@ function render() {
   }
 
   const highCount = visible.filter(e => e.importance === 'high').length;
-  const tag = selectedTicker ? `${selectedTicker} · ` : '';
-  summary.textContent = `${tag}${visible.length} events · ${highCount} high`;
+  const positions = paperCache.positions || [];
+  const unrealized = positions.reduce((sum, p) => sum + Number(p.unrealized_pnl || 0), 0);
+  if (summary) {
+    if (pageMode === 'paper') {
+      summary.textContent = `${positions.length} positions · U-PnL ${money(unrealized)}`;
+    } else {
+      const tag = selectedTicker ? `${selectedTicker} · ` : '';
+      summary.textContent = `${tag}${visible.length} events · ${highCount} high`;
+    }
+  }
+  if (feedContext) {
+    if (pageMode === 'paper') {
+      feedContext.textContent = executionModeLabel(executionCache?.mode || 'paper');
+    } else {
+      feedContext.textContent = selectedTicker
+        ? `${selectedTicker} focused view`
+        : `All tickers · ${watchlistCache.length || 0} names in scope`;
+    }
+  }
 
   renderWatchlist(watchlistCache);
   renderPaperPanel();
+  renderHeroBand();
 }
 
 function money(n) {
   const sign = n > 0 ? '+' : '';
   return `${sign}$${Number(n || 0).toFixed(2)}`;
+}
+
+function compactMoney(n) {
+  const value = Number(n || 0);
+  if (!Number.isFinite(value)) return '-';
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
+    notation: 'compact',
+    maximumFractionDigits: 2,
+  }).format(value);
+}
+
+function renderHeroBand() {
+  const counts = {};
+  allEvents.forEach((e) => { counts[e.ticker] = (counts[e.ticker] || 0) + 1; });
+  const topTicker = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  const highCount = allEvents.filter(e => e.importance === 'high').length;
+  const readiness = executionCache?.readiness || {};
+  const blockers = readiness.blockers || [];
+  if (heroWatchlistCount) {
+    heroWatchlistCount.textContent = String(watchlistCache.length || 0);
+    heroWatchlistNote.textContent = selectedTicker
+      ? `focused on ${selectedTicker}`
+      : (watchlistCache.length ? 'active market universe' : 'add tickers to begin');
+  }
+  if (heroEventCount) {
+    heroEventCount.textContent = String(allEvents.length || 0);
+    heroEventNote.textContent = topTicker
+      ? `most active · ${topTicker[0]} (${topTicker[1]})`
+      : 'waiting for event history';
+  }
+  if (heroHighCount) {
+    heroHighCount.textContent = String(highCount);
+    heroHighNote.textContent = highCount
+      ? `${Math.round((highCount / Math.max(1, allEvents.length)) * 100)}% of cached feed`
+      : 'no high-priority alerts cached';
+  }
+  if (heroPaperEquity) {
+    heroPaperEquity.textContent = paperCache.equity ? compactMoney(paperCache.equity) : '-';
+    heroPaperNote.textContent = (paperCache.positions || []).length
+      ? `${paperCache.positions.length} open positions`
+      : 'paper book flat';
+  }
+  if (heroExecutionMode) {
+    heroExecutionMode.textContent = executionModeLabel(executionCache?.mode || 'paper');
+    heroExecutionNote.textContent = readiness.live_ready
+      ? 'live thresholds satisfied'
+      : (blockers[0] || 'guardrails active');
+  }
+}
+
+function ensureRibbonPlaceholder() {
+  if (!liveRibbon) return;
+  if (!liveRibbon.children.length) {
+    liveRibbon.innerHTML = '<span class="ribbon-placeholder">Structure marks and live IBKR state will appear here during the session.</span>';
+  }
 }
 
 function executionModeLabel(mode) {
@@ -197,7 +294,14 @@ function renderPaperPanel() {
   `;
   if (!positions.length) {
     positionsEl.innerHTML = '<div class="paper-empty">当前无持仓</div>';
+    if (paperPositionDesk) paperPositionDesk.innerHTML = '<div class="paper-stage-empty">当前没有模拟持仓，新的 paper entry 会显示在这里。</div>';
+    if (paperPositionStage) paperPositionStage.classList.add('is-empty');
+    if (paperStageNote) paperStageNote.textContent = 'No open positions';
     return;
+  }
+  if (paperPositionStage) paperPositionStage.classList.remove('is-empty');
+  if (paperStageNote) {
+    paperStageNote.textContent = `${positions.length} ${positions.length > 1 ? 'positions' : 'position'} live`;
   }
   positionsEl.innerHTML = positions.map(p => `
     <div class="paper-pos">
@@ -214,6 +318,46 @@ function renderPaperPanel() {
       </div>
     </div>
   `).join('');
+  if (paperPositionDesk) {
+    paperPositionDesk.innerHTML = positions.map((p) => `
+      <article class="paper-position-card ${p.side === 'short' ? 'short' : 'long'}">
+        <div class="paper-position-top">
+          <div class="paper-position-title">
+            <h5>${escapeHtml(p.ticker)}</h5>
+            <p>${escapeHtml(p.reason)}</p>
+          </div>
+          <div class="paper-position-tags">
+            <span class="paper-side ${p.side === 'short' ? 'short' : 'long'}">${p.side === 'short' ? 'SHORT' : 'LONG'}</span>
+            <span class="paper-qty-tag">${p.qty} sh</span>
+          </div>
+        </div>
+        <div class="paper-position-grid">
+          <div class="paper-position-metric">
+            <span>Entry</span>
+            <strong>${Number(p.entry_price).toFixed(2)}</strong>
+          </div>
+          <div class="paper-position-metric">
+            <span>Mark</span>
+            <strong>${Number(p.mark_price).toFixed(2)}</strong>
+          </div>
+          <div class="paper-position-metric">
+            <span>U-PnL</span>
+            <strong class="${Number(p.unrealized_pnl) >= 0 ? 'pos' : 'neg'}">${money(p.unrealized_pnl)}</strong>
+          </div>
+        </div>
+        <div class="paper-position-footer">
+          <div class="paper-position-line">
+            <span>Stop ${Number(p.sl).toFixed(2)}</span>
+            <span>Target ${Number(p.tp).toFixed(2)}</span>
+          </div>
+          <div class="paper-position-line">
+            <span>Fee ${Number(p.entry_fee || 0).toFixed(2)}</span>
+            <span>Opened ${new Date(p.entry_ts).toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })}</span>
+          </div>
+        </div>
+      </article>
+    `).join('');
+  }
 }
 
 /* ---------- watchlist ---------- */
@@ -269,6 +413,7 @@ async function addTicker(ticker) {
   }
   const data = await r.json();
   renderWatchlist(data.tickers);
+  renderHeroBand();
   addInput.value = '';
 }
 
@@ -315,6 +460,7 @@ async function loadWatchlist() {
   const data = await r.json();
   watchlistCache = data.tickers;
   renderWatchlist(data.tickers);
+  renderHeroBand();
 }
 
 async function loadPaper() {
@@ -323,6 +469,7 @@ async function loadPaper() {
     const data = await r.json();
     paperCache = data;
     renderPaperPanel();
+    renderHeroBand();
   } catch (e) { /* silent */ }
 }
 
@@ -332,6 +479,7 @@ async function loadExecutionMode() {
     const d = await r.json();
     executionCache = d;
     renderExecutionPanel();
+    renderHeroBand();
   } catch (e) { /* silent */ }
 }
 
@@ -358,6 +506,7 @@ async function setExecutionMode(mode) {
     }
     executionCache = body;
     renderExecutionPanel();
+    renderHeroBand();
     await loadPaper();
     await loadHealth();
     await loadHistory();
@@ -375,13 +524,19 @@ async function loadHistory() {
 }
 
 function appendStructureBadge(s) {
+  if (!liveRibbon) return;
   const div = document.createElement('div');
   div.className = 'struct-badge struct-' + s.kind;
   const t = new Date(s.ts).toLocaleTimeString('zh-CN',
     { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const price = typeof s.price === 'number' ? s.price.toFixed(2) : s.price;
   div.textContent = `${t} · ${s.ticker} ${s.tf} · ${String(s.kind).toUpperCase()} @ ${price}`;
-  feed.prepend(div);
+  const placeholder = liveRibbon.querySelector('.ribbon-placeholder');
+  if (placeholder) placeholder.remove();
+  liveRibbon.prepend(div);
+  while (liveRibbon.children.length > 8) {
+    liveRibbon.removeChild(liveRibbon.lastElementChild);
+  }
 }
 
 async function openPaperTrades() {
@@ -565,7 +720,7 @@ async function openPaperStats() {
 }
 
 async function openDiagnostics() {
-  openModal('运行诊断', '<p class="empty-note">加载中…</p>');
+  openWorkbench('运行诊断', '<p class="empty-note">加载中…</p>', { kicker: 'System Diagnostics', toolId: 'btn-diagnostics' });
   try {
     const r = await fetch('/api/diagnostics');
     const d = await r.json();
@@ -589,7 +744,7 @@ async function openDiagnostics() {
         <td>${formatDiagTime(src.last_error_at)}</td>
       </tr>
     `).join('');
-    openModal('运行诊断', `
+    openWorkbench('运行诊断', `
       <div class="diag-grid">
         <div class="diag-card">
           <h4>Startup</h4>
@@ -638,9 +793,9 @@ async function openDiagnostics() {
           <tbody>${rows || '<tr><td class="win" colspan="11">No source diagnostics</td></tr>'}</tbody>
         </table>
       </div>
-    `);
+    `, { kicker: 'System Diagnostics', toolId: 'btn-diagnostics' });
   } catch (e) {
-    openModal('运行诊断', `<p class="empty-note">加载失败: ${e.message}</p>`);
+    openWorkbench('运行诊断', `<p class="empty-note">加载失败: ${e.message}</p>`, { kicker: 'System Diagnostics', toolId: 'btn-diagnostics' });
   }
 }
 
@@ -893,7 +1048,7 @@ function openChartPanel(initialTicker, initialInterval = '5m', initialRange = 5)
   const rangeOpts = [1, 5, 30, 90]
     .map(v => `<option value="${v}"${v === initialRange ? ' selected' : ''}>${v}d</option>`)
     .join('');
-  openModal('图表可视化', `
+  openWorkbench('图表可视化', `
     <div class="chart-controls">
       <select id="chart-ticker">${tickerOpts}</select>
       <select id="chart-interval">${intervalOpts}</select>
@@ -901,7 +1056,7 @@ function openChartPanel(initialTicker, initialInterval = '5m', initialRange = 5)
       <button class="bt-run" id="chart-run">更新</button>
     </div>
     <div id="chart-view"><p class="empty-note">加载中…</p></div>
-  `);
+  `, { kicker: 'Chart Desk', toolId: 'btn-chart' });
   const tickerEl = document.getElementById('chart-ticker');
   const intervalEl = document.getElementById('chart-interval');
   const rangeEl = document.getElementById('chart-range');
@@ -980,9 +1135,43 @@ function openModal(title, html) {
 }
 function closeModal() { modal.classList.add('hidden'); }
 
+/* ---------- workbench stage ---------- */
+function setWorkbenchActive(toolId) {
+  document.querySelectorAll('#btn-diagnostics, #btn-chart, #btn-digest, #btn-backtest')
+    .forEach(btn => btn.classList.toggle('active', btn.id === toolId));
+}
+
+function openWorkbench(title, html, options = {}) {
+  if (!workbenchStage || !workbenchBody) return openModal(title, html);
+  workbenchTitle.textContent = title;
+  workbenchKicker.textContent = options.kicker || 'Workbench';
+  workbenchBody.innerHTML = html;
+  workbenchStage.classList.remove('hidden');
+  if (eventsStageHead) eventsStageHead.classList.add('hidden');
+  if (feed) feed.classList.add('hidden');
+  if (liveRibbon) liveRibbon.classList.add('hidden');
+  if (paperPositionStage) paperPositionStage.classList.add('hidden');
+  setWorkbenchActive(options.toolId || '');
+}
+
+function closeWorkbench() {
+  if (!workbenchStage) return;
+  workbenchStage.classList.add('hidden');
+  if (eventsStageHead) eventsStageHead.classList.remove('hidden');
+  if (pageMode === 'events') {
+    if (feed) feed.classList.remove('hidden');
+    if (liveRibbon) liveRibbon.classList.remove('hidden');
+  } else if (paperPositionStage) {
+    paperPositionStage.classList.remove('hidden');
+  }
+  setWorkbenchActive('');
+}
+
+if (workbenchBack) workbenchBack.addEventListener('click', closeWorkbench);
+
 /* ---------- digest ---------- */
 document.getElementById('btn-digest').addEventListener('click', async () => {
-  openModal('早报预览', '<p class="empty-note">加载中…</p>');
+  openWorkbench('早报预览', '<p class="empty-note">加载中…</p>', { kicker: 'Daily Brief', toolId: 'btn-digest' });
   try {
     const r = await fetch('/api/digest?hours=24');
     const d = await r.json();
@@ -990,9 +1179,9 @@ document.getElementById('btn-digest').addEventListener('click', async () => {
       <p style="color:var(--text-2);margin-bottom:12px">${escapeHtml(d.title)}</p>
       <pre>${escapeHtml(d.body)}</pre>
     `;
-    openModal('早报预览', html);
+    openWorkbench('早报预览', html, { kicker: 'Daily Brief', toolId: 'btn-digest' });
   } catch (e) {
-    openModal('早报预览', `<p class="empty-note">加载失败: ${e.message}</p>`);
+    openWorkbench('早报预览', `<p class="empty-note">加载失败: ${e.message}</p>`, { kicker: 'Daily Brief', toolId: 'btn-digest' });
   }
 });
 document.getElementById('btn-diagnostics').addEventListener('click', openDiagnostics);
@@ -1021,6 +1210,9 @@ document.getElementById('btn-paper-trades').addEventListener('click', openPaperT
 document.getElementById('btn-paper-equity').addEventListener('click', openPaperEquity);
 document.getElementById('btn-paper-review').addEventListener('click', openPaperReview);
 document.getElementById('btn-paper-stats').addEventListener('click', openPaperStats);
+document.getElementById('btn-paper-trades-sidebar').addEventListener('click', openPaperTrades);
+document.getElementById('btn-paper-equity-sidebar').addEventListener('click', openPaperEquity);
+document.getElementById('btn-paper-review-sidebar').addEventListener('click', openPaperReview);
 
 /* ---------- backtest ---------- */
 const btBtn = document.getElementById('btn-backtest');
@@ -1045,7 +1237,7 @@ function renderBacktestPanel(ticker, eventType) {
     </div>
     <div id="bt-result"><p class="empty-note">加载中…</p></div>
   `;
-  openModal(`事件回测`, controls);
+  openWorkbench('事件回测', controls, { kicker: 'Event Backtest', toolId: 'btn-backtest' });
   const runEl = document.getElementById('bt-run');
   const tickerEl = document.getElementById('bt-ticker');
   const typeEl = document.getElementById('bt-type');
@@ -1142,6 +1334,7 @@ function renderSources(d) {
 
 /* ---------- boot ---------- */
 (async () => {
+  ensureRibbonPlaceholder();
   await loadHistory();
   await loadPaper();
   await loadHealth();

@@ -49,7 +49,10 @@ def test_http_429_is_classified_as_quota_exhausted():
     snap = h.snapshot()
     assert snap["reason"] == "quota_exhausted"
     assert snap["last_status"] == 429
-    assert snap["consecutive_4xx"] == 1
+    # 429 is rate-limiting (temporary), not a permanent auth/access failure;
+    # it must not accumulate into the disable streak.
+    assert snap["consecutive_4xx"] == 0
+    assert not snap["disabled"]
 
 
 def test_non_4xx_error_resets_disable_streak():
