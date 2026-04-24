@@ -1,5 +1,4 @@
 import logging
-from dataclasses import asdict
 from datetime import datetime, timezone
 
 from deduplicator import Deduplicator
@@ -7,7 +6,7 @@ from enricher import Enricher
 from event_scorer import score
 from notifier import Notifier
 from pushers import PushHub
-from sources.base import Event, Source
+from sources.base import Event, Source, serialize_event
 from storage import Storage
 
 log = logging.getLogger(__name__)
@@ -63,7 +62,7 @@ class Pipeline:
         for ev in fresh:
             if self._storage.insert(ev):
                 inserted += 1
-                await self._notifier.publish(self._serialize(ev))
+                await self._notifier.publish(serialize_event(ev))
                 if ev.importance == "high" and self._push_hub and self._push_hub.enabled:
                     try:
                         await self._push_hub.broadcast(ev)
@@ -73,10 +72,3 @@ class Pipeline:
         self.last_run_inserted = inserted
         log.info("pipeline inserted %d events", inserted)
         return inserted
-
-    @staticmethod
-    def _serialize(ev: Event) -> dict:
-        d = asdict(ev)
-        d["published_at"] = ev.published_at.isoformat()
-        d.pop("raw", None)
-        return d

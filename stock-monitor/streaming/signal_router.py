@@ -6,7 +6,7 @@ from datetime import datetime
 
 from notifier import Notifier
 from pushers import PushHub
-from sources.base import Event
+from sources.base import Event, serialize_event
 from storage import Storage
 from streaming.anomaly import AnomalySignal
 from smc.types import SmcSignal, StructureEvent
@@ -58,7 +58,7 @@ class SignalRouter:
             importance=_TIER_IMPORTANCE[sig.tier], summary_cn=None,
         )
         if self._s.insert(ev):
-            await self._n.publish(self._serialize(ev))
+            await self._n.publish(serialize_event(ev))
             if ev.importance == "high" and self._p and self._p.enabled:
                 try:
                     await self._p.broadcast(ev)
@@ -92,7 +92,7 @@ class SignalRouter:
         )
         inserted, event_id = self._s.insert_with_id(ev)
         if inserted:
-            await self._n.publish(self._serialize(ev))
+            await self._n.publish(serialize_event(ev))
         return event_id
 
     async def on_execution_intent(self, sig: SmcSignal, *, mode: str, status: str, note: str) -> int | None:
@@ -117,12 +117,5 @@ class SignalRouter:
         )
         inserted, event_id = self._s.insert_with_id(ev)
         if inserted:
-            await self._n.publish(self._serialize(ev))
+            await self._n.publish(serialize_event(ev))
         return event_id
-
-    @staticmethod
-    def _serialize(ev: Event) -> dict:
-        d = asdict(ev)
-        d["published_at"] = ev.published_at.isoformat()
-        d.pop("raw", None)
-        return d
