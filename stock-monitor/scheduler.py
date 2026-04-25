@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -6,6 +7,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 
 import config
+from paper.earnings_reaction import backfill_earnings_reactions
 from backup import backup_database
 from paper.review import send_daily_review
 from digest import send_digest
@@ -158,6 +160,27 @@ def start_scheduler(
                 id="paper_daily_review",
                 kwargs={"storage": storage, "push_hub": push_hub},
             )
+    if paper_broker is not None:
+        scheduler.add_job(
+            lambda: backfill_earnings_reactions(storage, paper_broker.pricing),
+            IntervalTrigger(minutes=5),
+            id="earnings_reaction_backfill",
+            next_run_time=None,
+        )
+
+    def _stale_sweep():
+        cutoff = (datetime.now(timezone.utc).date()
+                  - timedelta(days=config.EARNINGS_STALE_LOOKBACK_DAYS)).isoformat()
+        n = storage.mark_stale_scheduled_before(cutoff)
+        if n:
+            log.info("earnings stale sweep: marked %d rows stale", n)
+
+    scheduler.add_job(
+        _stale_sweep,
+        CronTrigger(hour=0, minute=10),
+        id="earnings_stale_sweep",
+    )
+
     scheduler.start()
     log.info("scheduler started")
     return scheduler
