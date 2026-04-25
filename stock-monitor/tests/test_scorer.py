@@ -46,3 +46,31 @@ def test_unknown_type_is_low():
 
 def test_case_insensitive_matching():
     assert score(_event("news", title="FDA APPROVAL granted")) == "high"
+
+
+def _ep_ev(*, surprise=None, importance="low"):
+    return Event(
+        source="finnhub", external_id="x", ticker="AAPL",
+        event_type="earnings_published",
+        title="AAPL EPS", summary=f"surprise={surprise}",
+        url=None,
+        published_at=datetime(2026, 4, 30, 20, 5, tzinfo=timezone.utc),
+        raw={"surprise_pct": surprise} if surprise is not None else {},
+        importance=importance,
+    )
+
+
+def test_earnings_published_high_when_surprise_above_threshold():
+    assert score(_ep_ev(surprise=0.07)) == "high"
+
+
+def test_earnings_published_high_when_negative_surprise_above_threshold():
+    assert score(_ep_ev(surprise=-0.08)) == "high"
+
+
+def test_earnings_published_medium_when_surprise_below_threshold():
+    assert score(_ep_ev(surprise=0.02)) == "medium"
+
+
+def test_earnings_published_medium_when_surprise_unknown():
+    assert score(_ep_ev(surprise=None)) == "medium"
