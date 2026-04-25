@@ -239,6 +239,58 @@ class Storage:
         self._conn.commit()
         return cur.rowcount
 
+    def upsert_earnings(
+        self,
+        *,
+        ticker: str,
+        scheduled_date: str,
+        scheduled_hour: str | None,
+        eps_estimate: float | None,
+        eps_actual: float | None,
+        rev_estimate: float | None,
+        rev_actual: float | None,
+        status: str,
+        updated_at: datetime,
+    ) -> None:
+        self._conn.execute(
+            """
+            INSERT INTO earnings_calendar
+                (ticker, scheduled_date, scheduled_hour,
+                 eps_estimate, eps_actual, rev_estimate, rev_actual,
+                 status, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticker, scheduled_date) DO UPDATE SET
+                scheduled_hour = excluded.scheduled_hour,
+                eps_estimate   = excluded.eps_estimate,
+                rev_estimate   = excluded.rev_estimate,
+                updated_at     = excluded.updated_at
+            """,
+            (
+                ticker, scheduled_date, scheduled_hour,
+                eps_estimate, eps_actual, rev_estimate, rev_actual,
+                status, updated_at.isoformat(),
+            ),
+        )
+        self._conn.commit()
+
+    def get_earnings(self, ticker: str, scheduled_date: str) -> dict | None:
+        row = self._conn.execute(
+            "SELECT * FROM earnings_calendar WHERE ticker=? AND scheduled_date=?",
+            (ticker, scheduled_date),
+        ).fetchone()
+        return dict(row) if row is not None else None
+
+    def find_earnings_in_range(
+        self, ticker: str, date_from: str, date_to: str,
+    ) -> list[dict]:
+        rows = self._conn.execute(
+            """SELECT * FROM earnings_calendar
+               WHERE ticker = ? AND scheduled_date BETWEEN ? AND ?
+               ORDER BY scheduled_date ASC""",
+            (ticker, date_from, date_to),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def insert_smc_structure(
         self, *, ticker: str, tf: str, kind: str, price: float,
         ts: datetime, ref_id: int | None = None, meta: dict | None = None,
