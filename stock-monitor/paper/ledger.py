@@ -61,6 +61,10 @@ class Ledger:
                 mark_price=float(row["mark_price"]),
             )
 
+    @property
+    def storage(self):
+        return self._storage
+
     def positions(self) -> list[Position]:
         return list(self._positions.values())
 

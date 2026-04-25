@@ -6,6 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
+from paper.earnings_gate import in_earnings_blackout
 from paper.ledger import Ledger
 from paper.pricing import PriceBook
 from paper.strategy import SmcLongStrategy
@@ -206,6 +207,12 @@ class PaperBroker:
         if blocked is not None:
             log.info("paper signal for %s blocked: %s", signal.ticker, blocked)
             return None
+        blocked, reason = in_earnings_blackout(
+            self._ledger.storage, signal.ticker, signal.ts
+        )
+        if blocked:
+            log.info("paper signal for %s blocked by earnings: %s", signal.ticker, reason)
+            return None
         self._pending_entries[signal.ticker] = PendingEntry(signal=signal, signal_id=signal_id)
         return {
             "ticker": signal.ticker,
@@ -225,6 +232,13 @@ class PaperBroker:
         blocked = self._check_risk_gate(ts)
         if blocked is not None:
             log.info("paper pending entry for %s canceled: %s", ticker, blocked)
+            self._pending_entries.pop(ticker, None)
+            return None
+        blocked, reason = in_earnings_blackout(
+            self._ledger.storage, signal.ticker, ts
+        )
+        if blocked:
+            log.info("paper pending entry for %s canceled by earnings: %s", signal.ticker, reason)
             self._pending_entries.pop(ticker, None)
             return None
         fill_price = self._apply_slippage(price=price, side=signal.side, action="entry")

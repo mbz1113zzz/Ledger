@@ -1,6 +1,7 @@
 import tempfile
 from datetime import datetime, timedelta, timezone
 
+import config
 from paper.broker import PaperBroker
 from paper.ledger import Ledger
 from paper.pricing import PriceBook
@@ -320,3 +321,52 @@ async def test_gross_exposure_cap_counts_both_long_and_short_exposure():
     assert queued is not None
     await broker.on_tick("TSLA", 100.0, datetime(2026, 4, 19, 14, 33, tzinfo=timezone.utc))
     assert broker.ledger.position_for("TSLA") is None
+
+
+def _signal_at(ts):
+    return SmcSignal(ts=ts, ticker="AAPL", entry=100.0, sl=99.0, tp=102.0, reason="smc_bos_ob")
+
+
+async def test_on_smc_signal_blocked_by_earnings_blackout(monkeypatch):
+    monkeypatch.setattr(config, "EARNINGS_BLACKOUT_ENABLED", True)
+    monkeypatch.setattr(config, "EARNINGS_BLACKOUT_BEFORE_MIN", 990)
+    monkeypatch.setattr(config, "EARNINGS_BLACKOUT_AFTER_MIN", 1080)
+    storage = _storage()
+    storage.upsert_earnings(
+        ticker="AAPL", scheduled_date="2026-04-30", scheduled_hour="amc",
+        eps_estimate=1.0, eps_actual=None, rev_estimate=1.0, rev_actual=None,
+        status="scheduled",
+        updated_at=datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc),
+    )
+    broker = PaperBroker(
+        ledger=Ledger(storage),
+        strategy=SmcLongStrategy(),
+        prices=PriceBook(),
+        max_hold_min=60,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
+    )
+    ts = datetime(2026, 4, 30, 18, 0, tzinfo=timezone.utc)   # 14:00 ET, inside AMC blackout
+    sig = _signal_at(ts)
+    result = await broker.on_smc_signal(sig, signal_id=1)
+    assert result is None
+    assert "AAPL" not in broker._pending_entries
+
+
+async def test_on_smc_signal_proceeds_when_no_earnings(monkeypatch):
+    monkeypatch.setattr(config, "EARNINGS_BLACKOUT_ENABLED", True)
+    storage = _storage()
+    broker = PaperBroker(
+        ledger=Ledger(storage),
+        strategy=SmcLongStrategy(),
+        prices=PriceBook(),
+        max_hold_min=60,
+        slippage_bps=0.0,
+        commission_per_share=0.0,
+        commission_min=0.0,
+    )
+    ts = datetime(2026, 4, 30, 18, 0, tzinfo=timezone.utc)
+    result = await broker.on_smc_signal(_signal_at(ts), signal_id=1)
+    assert result is not None
+    assert result["status"] == "queued"
