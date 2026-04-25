@@ -291,6 +291,86 @@ class Storage:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def transition_to_published(
+        self,
+        *,
+        ticker: str,
+        scheduled_date: str,
+        eps_actual: float | None,
+        rev_actual: float | None,
+        surprise_pct: float | None,
+        mark_at_publish_price: float | None,
+        detected_publish_at: datetime,
+    ) -> None:
+        self._conn.execute(
+            """UPDATE earnings_calendar
+               SET status='published_pending_reaction',
+                   eps_actual=?, rev_actual=?, surprise_pct=?,
+                   mark_at_publish_price=?,
+                   detected_publish_at=?, updated_at=?
+               WHERE ticker=? AND scheduled_date=?""",
+            (
+                eps_actual, rev_actual, surprise_pct,
+                mark_at_publish_price,
+                detected_publish_at.isoformat(),
+                detected_publish_at.isoformat(),
+                ticker, scheduled_date,
+            ),
+        )
+        self._conn.commit()
+
+    def set_published_event_id(self, ticker: str, scheduled_date: str, event_id: int) -> None:
+        self._conn.execute(
+            "UPDATE earnings_calendar SET published_event_id=? WHERE ticker=? AND scheduled_date=?",
+            (event_id, ticker, scheduled_date),
+        )
+        self._conn.commit()
+
+    def update_earnings_reaction(self, row_id: int, reaction_pct: float | None) -> None:
+        self._conn.execute(
+            "UPDATE earnings_calendar SET reaction_pct_30m=? WHERE id=?",
+            (reaction_pct, row_id),
+        )
+        self._conn.commit()
+
+    def set_earnings_status(self, row_id: int, status: str) -> None:
+        self._conn.execute(
+            "UPDATE earnings_calendar SET status=? WHERE id=?",
+            (status, row_id),
+        )
+        self._conn.commit()
+
+    def list_earnings_by_status(self, status: str) -> list[dict]:
+        rows = self._conn.execute(
+            "SELECT * FROM earnings_calendar WHERE status=? ORDER BY scheduled_date ASC",
+            (status,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+    def mark_stale_scheduled_before(self, before_date: str) -> int:
+        cur = self._conn.execute(
+            """UPDATE earnings_calendar
+               SET status='stale'
+               WHERE status='scheduled' AND scheduled_date < ?""",
+            (before_date,),
+        )
+        self._conn.commit()
+        return cur.rowcount
+
+    def update_event_summary(self, event_id: int, summary: str) -> None:
+        """Mutate the summary column of a single events row.
+
+        This is the sole append-only exception in the events table — used by
+        the earnings reaction backfill to enrich a published event 30 minutes
+        after the fact. Identified by id only; raw and other fields are
+        untouched.
+        """
+        self._conn.execute(
+            "UPDATE events SET summary=? WHERE id=?",
+            (summary, event_id),
+        )
+        self._conn.commit()
+
     def insert_smc_structure(
         self, *, ticker: str, tf: str, kind: str, price: float,
         ts: datetime, ref_id: int | None = None, meta: dict | None = None,

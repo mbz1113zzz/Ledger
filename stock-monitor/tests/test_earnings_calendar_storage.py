@@ -50,6 +50,132 @@ def test_earnings_calendar_unique_ticker_date(tmp_path):
 
 from datetime import datetime, timezone
 
+from sources.base import Event
+
+
+def _seed_scheduled(s, ticker="AAPL", date="2026-04-30"):
+    now = datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)
+    s.upsert_earnings(
+        ticker=ticker, scheduled_date=date, scheduled_hour="amc",
+        eps_estimate=1.42, eps_actual=None,
+        rev_estimate=120e9, rev_actual=None,
+        status="scheduled", updated_at=now,
+    )
+    return s.get_earnings(ticker, date)
+
+
+def test_transition_to_published_sets_actuals_and_surprise(tmp_path):
+    s = _storage(tmp_path)
+    _seed_scheduled(s)
+    detected = datetime(2026, 4, 30, 20, 5, tzinfo=timezone.utc)
+    s.transition_to_published(
+        ticker="AAPL", scheduled_date="2026-04-30",
+        eps_actual=1.50, rev_actual=125e9,
+        surprise_pct=(1.50 - 1.42) / abs(1.42),
+        mark_at_publish_price=187.4,
+        detected_publish_at=detected,
+    )
+    row = s.get_earnings("AAPL", "2026-04-30")
+    assert row["status"] == "published_pending_reaction"
+    assert row["eps_actual"] == 1.50
+    assert row["rev_actual"] == 125e9
+    assert abs(row["surprise_pct"] - 0.0563) < 0.001
+    assert row["mark_at_publish_price"] == 187.4
+    assert row["detected_publish_at"] is not None
+
+
+def test_set_published_event_id_links_event(tmp_path):
+    s = _storage(tmp_path)
+    _seed_scheduled(s)
+    s.transition_to_published(
+        ticker="AAPL", scheduled_date="2026-04-30",
+        eps_actual=1.50, rev_actual=None, surprise_pct=None,
+        mark_at_publish_price=None,
+        detected_publish_at=datetime(2026, 4, 30, 20, 5, tzinfo=timezone.utc),
+    )
+    s.set_published_event_id("AAPL", "2026-04-30", 999)
+    row = s.get_earnings("AAPL", "2026-04-30")
+    assert row["published_event_id"] == 999
+
+
+def test_update_earnings_reaction_writes_pct(tmp_path):
+    s = _storage(tmp_path)
+    _seed_scheduled(s)
+    s.transition_to_published(
+        ticker="AAPL", scheduled_date="2026-04-30",
+        eps_actual=1.50, rev_actual=None, surprise_pct=None,
+        mark_at_publish_price=100.0,
+        detected_publish_at=datetime(2026, 4, 30, 20, 5, tzinfo=timezone.utc),
+    )
+    row_id = s.get_earnings("AAPL", "2026-04-30")["id"]
+    s.update_earnings_reaction(row_id, 0.0321)
+    row = s.get_earnings("AAPL", "2026-04-30")
+    assert abs(row["reaction_pct_30m"] - 0.0321) < 1e-6
+
+
+def test_update_earnings_reaction_accepts_none(tmp_path):
+    s = _storage(tmp_path)
+    _seed_scheduled(s)
+    s.transition_to_published(
+        ticker="AAPL", scheduled_date="2026-04-30",
+        eps_actual=1.50, rev_actual=None, surprise_pct=None,
+        mark_at_publish_price=None,
+        detected_publish_at=datetime(2026, 4, 30, 20, 5, tzinfo=timezone.utc),
+    )
+    row_id = s.get_earnings("AAPL", "2026-04-30")["id"]
+    s.update_earnings_reaction(row_id, None)
+    row = s.get_earnings("AAPL", "2026-04-30")
+    assert row["reaction_pct_30m"] is None
+
+
+def test_set_earnings_status_terminal(tmp_path):
+    s = _storage(tmp_path)
+    _seed_scheduled(s)
+    row_id = s.get_earnings("AAPL", "2026-04-30")["id"]
+    s.set_earnings_status(row_id, "stale")
+    assert s.get_earnings("AAPL", "2026-04-30")["status"] == "stale"
+
+
+def test_list_earnings_by_status(tmp_path):
+    s = _storage(tmp_path)
+    _seed_scheduled(s, ticker="AAPL", date="2026-04-30")
+    _seed_scheduled(s, ticker="MSFT", date="2026-04-30")
+    s.transition_to_published(
+        ticker="AAPL", scheduled_date="2026-04-30",
+        eps_actual=1.50, rev_actual=None, surprise_pct=None,
+        mark_at_publish_price=100.0,
+        detected_publish_at=datetime(2026, 4, 30, 20, 5, tzinfo=timezone.utc),
+    )
+    pending = s.list_earnings_by_status("published_pending_reaction")
+    assert len(pending) == 1
+    assert pending[0]["ticker"] == "AAPL"
+
+
+def test_mark_stale_scheduled_before_date(tmp_path):
+    s = _storage(tmp_path)
+    _seed_scheduled(s, ticker="OLD", date="2026-01-01")
+    _seed_scheduled(s, ticker="NEW", date="2026-12-01")
+    n = s.mark_stale_scheduled_before("2026-04-18")
+    assert n == 1
+    assert s.get_earnings("OLD", "2026-01-01")["status"] == "stale"
+    assert s.get_earnings("NEW", "2026-12-01")["status"] == "scheduled"
+
+
+def test_update_event_summary(tmp_path):
+    s = _storage(tmp_path)
+    ev = Event(
+        source="finnhub", external_id="x-1", ticker="AAPL",
+        event_type="earnings_published", title="t", summary="old",
+        url=None,
+        published_at=datetime(2026, 4, 30, 20, 5, tzinfo=timezone.utc),
+        importance="high",
+    )
+    inserted, eid = s.insert_with_id(ev)
+    assert inserted and eid is not None
+    s.update_event_summary(eid, "new summary")
+    row = s._conn.execute("SELECT summary FROM events WHERE id=?", (eid,)).fetchone()
+    assert row["summary"] == "new summary"
+
 
 def test_upsert_earnings_inserts_new_row(tmp_path):
     s = _storage(tmp_path)
