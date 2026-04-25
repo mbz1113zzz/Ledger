@@ -236,3 +236,17 @@ def test_find_earnings_in_range_filters_ticker_and_date(tmp_path):
     rows = s.find_earnings_in_range("AAPL", "2026-04-29", "2026-05-01")
     dates = sorted(r["scheduled_date"] for r in rows)
     assert dates == ["2026-04-30"]
+
+
+def test_list_upcoming_earnings(tmp_path):
+    s = _storage(tmp_path)
+    now = datetime(2026, 4, 25, 0, 0, tzinfo=timezone.utc)
+    for date in ("2026-04-26", "2026-04-30", "2026-05-15"):
+        s.upsert_earnings(
+            ticker="AAPL", scheduled_date=date, scheduled_hour="amc",
+            eps_estimate=1.0, eps_actual=None, rev_estimate=1.0, rev_actual=None,
+            status="scheduled", updated_at=now,
+        )
+    rows = s.list_upcoming_earnings("2026-04-27", "2026-05-10")
+    dates = [r["scheduled_date"] for r in rows]
+    assert dates == ["2026-04-30"]

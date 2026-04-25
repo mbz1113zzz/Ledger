@@ -3,7 +3,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
@@ -382,6 +382,17 @@ def build_router(
             "trades": trades,
             "equity": equity,
         }
+
+    @router.get("/api/earnings/upcoming")
+    def upcoming_earnings(
+        from_: str | None = Query(None, alias="from"),
+        to: str | None = None,
+    ):
+        from datetime import datetime, timezone, timedelta
+        today = datetime.now(timezone.utc).date()
+        date_from = from_ or today.isoformat()
+        date_to = to or (today + timedelta(days=14)).isoformat()
+        return storage.list_upcoming_earnings(date_from, date_to)
 
     @router.get("/stream")
     async def stream(request: Request):

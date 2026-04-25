@@ -347,6 +347,16 @@ class Storage:
         ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_upcoming_earnings(self, date_from: str, date_to: str) -> list[dict]:
+        rows = self._conn.execute(
+            """SELECT * FROM earnings_calendar
+               WHERE scheduled_date BETWEEN ? AND ?
+                 AND status != 'stale'
+               ORDER BY scheduled_date ASC, ticker ASC""",
+            (date_from, date_to),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
     def mark_stale_scheduled_before(self, before_date: str) -> int:
         cur = self._conn.execute(
             """UPDATE earnings_calendar
