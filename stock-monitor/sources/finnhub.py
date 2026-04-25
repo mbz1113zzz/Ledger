@@ -83,10 +83,18 @@ class FinnhubSource(Source):
     BASE_URL = "https://finnhub.io/api/v1"
     EARNINGS_LOOKAHEAD_DAYS = 90
 
-    def __init__(self, api_key: str, *, enable_news: bool = True, enable_earnings: bool = True):
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        enable_news: bool = True,
+        enable_earnings: bool = True,
+        storage=None,
+    ):
         self._api_key = api_key
         self._enable_news = enable_news
         self._enable_earnings = enable_earnings
+        self._storage = storage
         self._news_health = SourceHealth(f"{self.name}:news")
         self._earnings_health = SourceHealth(f"{self.name}:earnings")
         self._health = _CombinedSourceHealth(
@@ -155,7 +163,7 @@ class FinnhubSource(Source):
                         duration_ms=(time_module.perf_counter() - t0) * 1000
                     )
                     for item in (data or {}).get("earningsCalendar") or []:
-                        ev = self._parse_earnings(item, ticker)
+                        ev = self._on_earnings_row(item, ticker)
                         if ev:
                             events.append(ev)
                 except httpx.TimeoutException as e:
@@ -195,30 +203,124 @@ class FinnhubSource(Source):
             log.debug("skipping malformed finnhub news: %s", e)
             return None
 
-    def _parse_earnings(self, item: dict, ticker: str) -> Event | None:
+    def _on_earnings_row(self, item: dict, ticker: str) -> Event | None:
         try:
             date_str = item["date"]
-            pub = datetime.combine(
-                datetime.strptime(date_str, "%Y-%m-%d").date(),
-                time(0, 0),
-                tzinfo=timezone.utc,
-            )
-        except (KeyError, ValueError, TypeError):
+        except (KeyError, TypeError):
             return None
-        hour_label = {"bmo": "盘前", "amc": "盘后", "dmh": "盘中"}.get(
-            item.get("hour") or "", ""
-        )
-        title = f"{ticker} 财报 {date_str}"
-        if hour_label:
-            title += f" {hour_label}"
-        return Event(
-            source=self.name,
-            external_id=f"{ticker}-earnings-{date_str}",
-            ticker=ticker,
-            event_type="earnings",
-            title=title,
-            summary=None,
-            url=None,
-            published_at=pub,
-            raw=item,
-        )
+
+        eps_estimate = item.get("epsEstimate")
+        eps_actual = item.get("epsActual")
+        rev_estimate = item.get("revenueEstimate")
+        rev_actual = item.get("revenueActual")
+        hour = item.get("hour") or None
+        now = datetime.now(timezone.utc)
+
+        hour_label = {"bmo": "盘前", "amc": "盘后", "dmh": "盘中"}.get(hour or "", "")
+
+        if self._storage is None:
+            # Storage-less mode (legacy / unit tests that don't care about the
+            # calendar table) — fall back to the old scheduled-only behavior.
+            try:
+                pub = datetime.combine(
+                    datetime.strptime(date_str, "%Y-%m-%d").date(),
+                    time(0, 0),
+                    tzinfo=timezone.utc,
+                )
+            except (ValueError, TypeError):
+                return None
+            title = f"{ticker} 财报 {date_str}"
+            if hour_label:
+                title += f" {hour_label}"
+            return Event(
+                source=self.name,
+                external_id=f"{ticker}-earnings-{date_str}",
+                ticker=ticker, event_type="earnings", title=title,
+                summary=None, url=None, published_at=pub, raw=item,
+            )
+
+        existing = self._storage.get_earnings(ticker, date_str)
+
+        if existing is None:
+            if eps_actual is None:
+                self._storage.upsert_earnings(
+                    ticker=ticker, scheduled_date=date_str, scheduled_hour=hour,
+                    eps_estimate=eps_estimate, eps_actual=None,
+                    rev_estimate=rev_estimate, rev_actual=None,
+                    status="scheduled", updated_at=now,
+                )
+                try:
+                    pub = datetime.combine(
+                        datetime.strptime(date_str, "%Y-%m-%d").date(),
+                        time(0, 0),
+                        tzinfo=timezone.utc,
+                    )
+                except (ValueError, TypeError):
+                    return None
+                title = f"{ticker} 财报 {date_str}"
+                if hour_label:
+                    title += f" {hour_label}"
+                return Event(
+                    source=self.name,
+                    external_id=f"{ticker}-earnings-{date_str}",
+                    ticker=ticker, event_type="earnings", title=title,
+                    summary=None, url=None, published_at=pub, raw=item,
+                )
+            # Bootstrap: actual is already populated. Land directly in `reacted`
+            # without re-broadcasting historical earnings.
+            self._storage.upsert_earnings(
+                ticker=ticker, scheduled_date=date_str, scheduled_hour=hour,
+                eps_estimate=eps_estimate, eps_actual=eps_actual,
+                rev_estimate=rev_estimate, rev_actual=rev_actual,
+                status="reacted", updated_at=now,
+            )
+            return None
+
+        if existing["status"] == "scheduled" and eps_actual is not None:
+            surprise = None
+            if eps_estimate not in (None, 0) and eps_actual is not None:
+                surprise = (eps_actual - eps_estimate) / abs(eps_estimate)
+            self._storage.transition_to_published(
+                ticker=ticker, scheduled_date=date_str,
+                eps_actual=eps_actual, rev_actual=rev_actual,
+                surprise_pct=surprise,
+                mark_at_publish_price=None,
+                detected_publish_at=now,
+            )
+            title = f"{ticker} 财报已公布 {date_str}"
+            if hour_label:
+                title += f" {hour_label}"
+            summary_bits = []
+            if eps_actual is not None and eps_estimate is not None:
+                summary_bits.append(f"EPS {eps_actual:.2f} vs {eps_estimate:.2f}")
+            elif eps_actual is not None:
+                summary_bits.append(f"EPS {eps_actual:.2f}")
+            if surprise is not None:
+                summary_bits.append(f"({surprise:+.1%})")
+            if rev_actual is not None and rev_estimate is not None:
+                summary_bits.append(f"Revenue {rev_actual/1e9:.2f}B vs {rev_estimate/1e9:.2f}B")
+            summary = "; ".join(summary_bits)
+            ev = Event(
+                source=self.name,
+                external_id=f"{ticker}-earnings-published-{date_str}",
+                ticker=ticker, event_type="earnings_published", title=title,
+                summary=summary, url=None, published_at=now,
+                raw={**item, "surprise_pct": surprise},
+            )
+            # Insert immediately so we can back-link the published_event_id.
+            # Pipeline will re-attempt insert and dedup harmlessly on the
+            # (source, external_id) UNIQUE constraint.
+            inserted, ev_id = self._storage.insert_with_id(ev)
+            if ev_id is not None:
+                self._storage.set_published_event_id(ticker, date_str, ev_id)
+            return ev
+
+        # Existing row, status='scheduled' but still no actual — refresh estimates.
+        if existing["status"] == "scheduled":
+            self._storage.upsert_earnings(
+                ticker=ticker, scheduled_date=date_str, scheduled_hour=hour,
+                eps_estimate=eps_estimate, eps_actual=None,
+                rev_estimate=rev_estimate, rev_actual=None,
+                status="scheduled", updated_at=now,
+            )
+        return None

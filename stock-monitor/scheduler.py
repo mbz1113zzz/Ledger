@@ -22,7 +22,7 @@ from storage import Storage
 log = logging.getLogger(__name__)
 
 
-def build_news_sources(sec_source: SecEdgarSource) -> list:
+def build_news_sources(sec_source: SecEdgarSource, storage: Storage | None = None) -> list:
     sources = []
     if config.FINNHUB_ENABLE_NEWS or config.FINNHUB_ENABLE_EARNINGS:
         sources.append(
@@ -30,6 +30,7 @@ def build_news_sources(sec_source: SecEdgarSource) -> list:
                 api_key=config.FINNHUB_API_KEY,
                 enable_news=config.FINNHUB_ENABLE_NEWS,
                 enable_earnings=config.FINNHUB_ENABLE_EARNINGS,
+                storage=storage,
             )
         )
     sources.append(sec_source)
@@ -69,7 +70,7 @@ def build_pipeline(
     enricher: Enricher,
     push_hub: PushHub,
 ) -> Pipeline:
-    sources = build_news_sources(sec_source)
+    sources = build_news_sources(sec_source, storage=storage)
     return Pipeline(
         sources=sources, storage=storage, notifier=notifier, tickers=tickers,
         enricher=enricher, push_hub=push_hub,
