@@ -71,6 +71,10 @@ class PaperBroker:
     def ledger(self) -> Ledger:
         return self._ledger
 
+    @property
+    def pricing(self):
+        return self._prices
+
     def has_open_positions(self) -> bool:
         return bool(self._ledger.positions())
 

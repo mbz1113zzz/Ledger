@@ -130,13 +130,14 @@ def create_app() -> FastAPI:
     sec_source = SecEdgarSource()
     enricher = build_enricher()
     push_hub = build_push_hub()
+    prices = PriceBook()
     pipeline = build_pipeline(
         storage, notifier, watchlist.tickers(), sec_source, enricher, push_hub,
+        pricing=prices,
     )
     price_pipeline = build_price_pipeline(
         storage, notifier, watchlist.tickers(), push_hub,
     )
-    prices = PriceBook()
     ledger = Ledger(storage, initial_cash=config.PAPER_INITIAL_CASH)
     strategy = SmcLongStrategy(
         max_position_pct=config.PAPER_MAX_POSITION_PCT,

@@ -90,11 +90,13 @@ class FinnhubSource(Source):
         enable_news: bool = True,
         enable_earnings: bool = True,
         storage=None,
+        pricing=None,
     ):
         self._api_key = api_key
         self._enable_news = enable_news
         self._enable_earnings = enable_earnings
         self._storage = storage
+        self._pricing = pricing
         self._news_health = SourceHealth(f"{self.name}:news")
         self._earnings_health = SourceHealth(f"{self.name}:earnings")
         self._health = _CombinedSourceHealth(
@@ -280,11 +282,12 @@ class FinnhubSource(Source):
             surprise = None
             if eps_estimate not in (None, 0) and eps_actual is not None:
                 surprise = (eps_actual - eps_estimate) / abs(eps_estimate)
+            mark_at_publish = self._pricing.latest(ticker) if self._pricing is not None else None
             self._storage.transition_to_published(
                 ticker=ticker, scheduled_date=date_str,
                 eps_actual=eps_actual, rev_actual=rev_actual,
                 surprise_pct=surprise,
-                mark_at_publish_price=None,
+                mark_at_publish_price=mark_at_publish,
                 detected_publish_at=now,
             )
             title = f"{ticker} 财报已公布 {date_str}"
