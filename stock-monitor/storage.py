@@ -75,6 +75,27 @@ CREATE TABLE IF NOT EXISTS paper_positions (
     mark_price REAL NOT NULL,
     updated_at TIMESTAMP NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS earnings_calendar (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticker TEXT NOT NULL,
+    scheduled_date TEXT NOT NULL,
+    scheduled_hour TEXT,
+    eps_estimate REAL,
+    eps_actual REAL,
+    rev_estimate REAL,
+    rev_actual REAL,
+    surprise_pct REAL,
+    reaction_pct_30m REAL,
+    mark_at_publish_price REAL,
+    status TEXT NOT NULL,
+    published_event_id INTEGER,
+    detected_publish_at TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL,
+    UNIQUE(ticker, scheduled_date)
+);
+CREATE INDEX IF NOT EXISTS idx_earnings_status_date ON earnings_calendar(status, scheduled_date);
+CREATE INDEX IF NOT EXISTS idx_earnings_ticker_date ON earnings_calendar(ticker, scheduled_date);
 """
 
 
